@@ -1,0 +1,10 @@
+.cursor
+.vscode
+.vscode.*
+
+**/venv
+
+.env
+.env.local
+.env.dev
+.env.prod
