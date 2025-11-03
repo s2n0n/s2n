@@ -74,7 +74,7 @@ class S2NXSSPlugin:
         if cookies:
             for key, value in cookies.items():
                 self.session.cookies.set(key, value)
-            print(f"[*] Cookies set: {list(cookies.keys())}")
+            print(f"[*] Cookie set: {list(cookies.keys())}")
 
         print(f"[*] s2n-xss v{self.payloads['metadata']['version']} initialized")
         print(f"[*] Loaded {self.payloads['metadata']['total_payloads']} payloads")
@@ -117,15 +117,12 @@ class S2NXSSPlugin:
         if params is None:
             parsed = urlparse(target_url)
             params = parse_qs(parsed.query)
-            # parse_qs는 값을 리스트로 반환하므로 첫 번째 값만 사용
-            params = {k: v[0] if isinstance(v, list) else v for k, v in params.items()}
-            
+            # query string이 없으면 빈 dict
             if not params:
                 params = {}
 
         if not params:
             print("[!] No parameters found to test")
-            print("[!] Please provide URL with parameters (e.g., ?id=1&name=test)")
             return self.results
 
         # Interactive mode: 파라미터 선택
@@ -588,235 +585,113 @@ class S2NXSSPlugin:
         print(f"\n[*] Report exported to: {output_path}")
 
 
-# ============================================================
-# Interactive launcher (범용 버전)
-# ============================================================
+# ----------------------------
+# Interactive launcher
+# ----------------------------
 if __name__ == "__main__":
     import os
     import sys
+    import time
+    import json
 
-    print("\n" + "=" * 60)
-    print("s2n-xss: XSS Vulnerability Scanner")
-    print("=" * 60)
-    print("\nSupported targets:")
-    print("  - General web applications (any URL with parameters)")
-    print("  - DVWA (Damn Vulnerable Web Application)")
-    print("  - Custom test environments")
-    print()
-
-    # 페이로드 파일 경로
+    # 기본 페이로드 파일: xss.py와 같은 디렉터리에 있는 xss_payloads.json
     default_payload = os.path.join(os.path.dirname(__file__), "xss_payloads.json")
 
-    # 1. Target URL 입력
-    print("=" * 60)
-    print("Step 1: Target URL")
-    print("=" * 60)
-    print("\nExamples:")
-    print("  - http://example.com/search?q=test")
-    print("  - http://localhost/dvwa/vulnerabilities/xss_r/?name=test")
-    print("  - https://testsite.com/page.php?id=1&category=news")
-    
+    print("s2n-xss — interactive launcher (uses S2NXSSPlugin)")
+    print("Enter the target URL to scan (example):")
+    print("http://localhost/dvwa/vulnerabilities/xss_r/?name=test")
     try:
-        target_url = input("\n[>] Enter target URL: ").strip()
+        target_url = input("Target URL (blank to exit): ").strip()
     except (KeyboardInterrupt, EOFError):
-        print("\n\nAborted by user.")
+        print("\nAborted.")
         sys.exit(0)
 
     if not target_url:
-        print("\n[!] No URL provided. Exiting.")
+        print("No target URL provided. Exiting.")
         sys.exit(0)
 
-    # URL 파싱하여 파라미터 확인
-    parsed = urlparse(target_url)
-    has_params = bool(parsed.query)
-    
-    if not has_params:
-        print("\n[!] Warning: No parameters found in URL")
-        print("[!] XSS scanning requires parameters (e.g., ?id=1&name=test)")
-        print("\n[?] Continue anyway? The scan may not find vulnerabilities.")
-        if input("[>] [y/n]: ").strip().lower() not in ['y', 'yes']:
-            print("Exiting.")
-            sys.exit(0)
-
-    # 2. 인증 필요 여부 확인 (DVWA 등)
-    print("\n" + "=" * 60)
-    print("Step 2: Authentication (Optional)")
-    print("=" * 60)
-    
-    is_dvwa = "dvwa" in target_url.lower()
-    
-    if is_dvwa:
-        print("\n[*] DVWA detected in URL")
-        print("\nDVWA requires authentication. To get your session cookie:")
-        print("  1. Login to DVWA (admin/password)")
-        print("  2. Press F12 → Application/Storage → Cookies")
-        print("  3. Copy PHPSESSID value")
-    else:
-        print("\n[?] Does this target require authentication/cookies?")
-    
-    print("\n[?] Do you want to provide authentication cookies?")
-    use_cookies = input("[>] [y/n]: ").strip().lower() in ['y', 'yes']
-    
-    cookies = None
-    if use_cookies:
-        print("\n[>] Enter PHPSESSID cookie value:")
-        phpsessid = input("[>] ").strip()
-        
-        if phpsessid:
-            cookies = {"PHPSESSID": phpsessid}
-            
-            if is_dvwa:
-                print("\n[?] DVWA Security Level? (default: low)")
-                print("  Choices: low, medium, high")
-                security = input("[>] ").strip().lower()
-                if security in ['low', 'medium', 'high']:
-                    cookies["security"] = security
-                else:
-                    cookies["security"] = "low"
-            
-            print(f"[+] Cookies configured: {list(cookies.keys())}")
-        else:
-            print("[!] No cookie provided, proceeding without authentication")
-
-    # 3. 스캔 설정
-    print("\n" + "=" * 60)
-    print("Step 3: Scan Configuration")
-    print("=" * 60)
-    
-    print("\n[?] Scan intensity:")
-    print("  1. Basic    - Fast, ~10 payloads (recommended for initial scan)")
-    print("  2. Moderate - Balanced, ~30 payloads (recommended)")
-    print("  3. Aggressive - Thorough, 50+ payloads (comprehensive)")
-    intensity_input = input("[>] Choice [1-3, default=2]: ").strip()
-    
-    if intensity_input in ['1', '2', '3']:
-        intensity = int(intensity_input)
-    else:
-        intensity = 2
-    
-    print(f"[+] Scan intensity: {intensity}/3")
-
-    # 4. 스캐너 초기화
-    print("\n" + "=" * 60)
-    print("Initializing Scanner")
-    print("=" * 60)
-    
     # 페이로드 파일 존재 확인
-    if not os.path.exists(default_payload):
-        print(f"\n[ERROR] Payload file not found: {default_payload}")
-        print("\nPlease ensure xss_payloads.json is in the same directory as xss.py")
-        print("Directory structure should be:")
-        print("  xss.py")
-        print("  xss_payloads.json")
-        sys.exit(1)
-    
-    try:
-        scanner = S2NXSSPlugin(
-            payloads_path=default_payload,
-            cookies=cookies,
-            timeout=10
+    payloads_path = default_payload
+    if not os.path.exists(payloads_path):
+        print(f"[ERROR] Payload file not found at expected path: {payloads_path}")
+        print(
+            "Place xss_payloads.json next to xss.py or change the path in the script."
         )
-    except Exception as e:
-        print(f"\n[ERROR] Failed to initialize scanner: {e}")
         sys.exit(1)
 
-    # 5. 스캔 실행
-    print("\n" + "=" * 60)
-    print("Starting Scan")
-    print("=" * 60)
-    
+    # S2NXSSPlugin 인스턴스 생성 (생성자 시 payloads_path 인자 지원하면 전달)
     try:
-        start_time = time.time()
-        results = scanner.scan(
-            target_url=target_url,
-            params=None,  # URL에서 자동 추출
-            method="GET",
-            intensity=intensity
-        )
-        elapsed_time = time.time() - start_time
-    except KeyboardInterrupt:
-        print("\n\n[!] Scan interrupted by user")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n[ERROR] Scan failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-
-    # 6. 결과 출력
-    print("\n" + "=" * 60)
-    print("SCAN RESULTS")
-    print("=" * 60)
-    print(f"\nScan completed in {elapsed_time:.1f} seconds")
-    print(f"Target: {target_url}")
-    print(f"Total vulnerabilities found: {len(results)}")
-    
-    if not results:
-        print("\n✅ No XSS vulnerabilities detected")
-        print("\nPossible reasons:")
-        print("  - Target is properly secured against XSS")
-        print("  - No parameters found in URL")
-        print("  - Authentication required (provide cookies)")
-        print("  - Connection/network issues")
-    else:
-        print(f"\n⚠️  Found {len(results)} XSS vulnerabilities!\n")
-        
-        # 심각도별 분류
-        severity_count = {}
-        for vuln in results:
-            sev = vuln['severity']
-            severity_count[sev] = severity_count.get(sev, 0) + 1
-        
-        print("Severity breakdown:")
-        for sev in ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']:
-            count = severity_count.get(sev, 0)
-            if count > 0:
-                print(f"  {sev}: {count}")
-        
-        # 상위 5개 취약점 요약
-        print("\n" + "-" * 60)
-        print("Top Vulnerabilities (showing up to 5):")
-        print("-" * 60)
-        
-        for i, vuln in enumerate(results[:5], 1):
-            print(f"\n[{i}] {vuln['vulnerability_type_ko']}")
-            print(f"    Severity: {vuln['severity']} (CVSS: {vuln['cvss_score']})")
-            print(f"    Parameter: {vuln['location']['parameter']}")
-            print(f"    Context: {vuln['evidence']['context_detected']}")
-            print(f"    Payload: {vuln['evidence']['payload_used'][:60]}...")
-        
-        if len(results) > 5:
-            print(f"\n... and {len(results) - 5} more vulnerabilities")
-        
-        # 리포트 저장
-        print("\n" + "=" * 60)
-        print("Saving Report")
-        print("=" * 60)
-        
+        # 강제로 payloads_path를 전달 — 파일 위치를 정확히 지정해서 실패 방지
         try:
-            scanner.export_report("s2n_xss_report.json")
-            print("\n[+] Detailed report saved: s2n_xss_report.json")
-            print("[+] Review the JSON file for complete vulnerability details")
-        except Exception as e:
-            print(f"\n[!] Failed to save report: {e}")
-    
-    # 7. 다음 단계 안내
-    print("\n" + "=" * 60)
-    print("Next Steps")
-    print("=" * 60)
-    
-    if results:
-        print("\n1. Review the detailed report: s2n_xss_report.json")
-        print("2. Check the 'fix_recommendation' for each vulnerability")
-        print("3. Implement fixes according to the 'code_example' section")
-        print("4. Re-scan after fixes to verify remediation")
-    else:
-        print("\n1. Verify the target URL has parameters to test")
-        print("2. If testing DVWA, ensure you're logged in and cookies are set")
-        print("3. Try increasing scan intensity (option 3)")
-        print("4. Check network connectivity to target")
-    
-    print("\n[*] Scan completed successfully!")
-    print("=" * 60)
-    
-    sys.exit(0 if not results else len(results))
+            scanner = S2NXSSPlugin(payloads_path=payloads_path)
+        except TypeError:
+            # 생성자가 payloads_path 인자를 안 받으면 빈 생성자로 시도
+            scanner = S2NXSSPlugin()
+    except Exception as e:
+        print("[ERROR] Could not instantiate S2NXSSPlugin:", e)
+        sys.exit(1)
+
+    # 호환성: 인스턴스에 payloads_path 속성이 있으면 설정
+    if hasattr(scanner, "payloads_path"):
+        try:
+            scanner.payloads_path = payloads_path
+        except Exception:
+            pass
+
+    # (선택) 디버그 기본값: scanner.debug 존재하면 False 유지. 필요시 편집으로 True 전환.
+    if hasattr(scanner, "debug"):
+        scanner.debug = True
+
+    # 실제 스캔 실행: scan(target) 우선, 없으면 run(target)
+    try:
+        print(f"\n[*] s2n-xss scanning {target_url} ...")
+        start = time.time()
+        if hasattr(scanner, "scan"):
+            results = scanner.scan(target_url)
+        elif hasattr(scanner, "run"):
+            results = scanner.run(target_url)
+        else:
+            raise RuntimeError(
+                "S2NXSSPlugin instance has neither scan() nor run() method."
+            )
+        elapsed = time.time() - start
+    except Exception as e:
+        print("[ERROR] Scan failed:", e)
+        sys.exit(1)
+
+    # 간단 요약 출력
+    total = 0
+    try:
+        if isinstance(results, dict):
+            findings = (
+                results.get("findings")
+                or results.get("vulnerabilities")
+                or results.get("results")
+                or []
+            )
+            total = len(findings)
+        elif isinstance(results, list):
+            total = len(results)
+    except Exception:
+        total = 0
+
+    print(
+        f"\n[*] Scan finished in {elapsed:.1f}s — Found {total} vulnerabilities (summary)."
+    )
+
+    # 리포트 파일 내보내기: export_report()가 있으면 사용, 없으면 results를 JSON으로 저장
+    try:
+        if hasattr(scanner, "export_report"):
+            outpath = "s2n_xss_report.json"
+            scanner.export_report(outpath)
+            print(f"[*] Report exported to: {outpath}")
+        else:
+            if isinstance(results, (dict, list)):
+                outpath = "s2n_xss_report.json"
+                with open(outpath, "w", encoding="utf-8") as f:
+                    json.dump(results, f, ensure_ascii=False, indent=2)
+                print(f"[*] Report saved to: {outpath}")
+    except Exception as e:
+        print("[WARN] Could not export report automatically:", e)
+
+    print("Done.")
