@@ -260,6 +260,11 @@ class StoredXSSDetector:
             if payload in body or unique_id in body:
                 return True, payload
 
+            import html
+
+            if html.escape(payload) in body:
+                return True, payload
+
             return False, payload
         except Exception:
             return False, payload
@@ -400,7 +405,6 @@ class S2NXSSPlugin:
         cookies: Optional[Dict] = None,
         timeout: int = 10,
         auto_detect: bool = True,
-        output_mode: str = 'summary',
     ):
         """
         Args:
@@ -425,7 +429,6 @@ class S2NXSSPlugin:
 
         # 사용자 에이전트 설정
         self.session.headers.update({"User-Agent": "s2n-xss/2.1 (Security Scanner)"})
-        self.output_mode = output_mode
 
         # 페이로드 로드
         with open(payloads_path, "r", encoding="utf-8") as f:
@@ -454,20 +457,6 @@ class S2NXSSPlugin:
                 lower = name.lower()
                 if any(keyword in lower for keyword in TOKEN_KEYWORDS):
                     params[name] = inp.get("value", "")
-
-    def _refresh_tokens(self, url: str, params: Dict[str, str], method: str) -> None:
-        """
-        요청 전 페이지를 새로 불러 최신 토큰 값을 확보
-        """
-        try:
-            if method.upper() == "GET":
-                resp = self.session.get(url, params=params, timeout=self.timeout)
-            else:
-                resp = self.session.get(url, timeout=self.timeout)
-            resp.encoding = resp.apparent_encoding
-            self._update_tokens_from_html(resp.text, params)
-        except Exception:
-            pass
 
     def _record_dom_vulnerabilities(self, url: str, dom_vulns: List[Tuple[str, str]]):
         """
@@ -608,120 +597,56 @@ class S2NXSSPlugin:
             self.payloads_data["korean_encoding_specific"]["fullwidth_chars"]
         )
 
-        # ✨ Extended sections (from enhanced PortSwigger 2025 edition)
-        if "event_handlers" in self.payloads_data:
-            for group in self.payloads_data["event_handlers"].values():
-                payloads.extend(group)
-        if "polyglots" in self.payloads_data:
-            payloads.extend(self.payloads_data["polyglots"])
-        if "waf_bypass" in self.payloads_data:
-            for group in self.payloads_data["waf_bypass"].values():
-                payloads.extend(group)
-        if "restricted_characters" in self.payloads_data:
-            for group in self.payloads_data["restricted_characters"].values():
-                payloads.extend(group)
-        if "protocols" in self.payloads_data:
-            for group in self.payloads_data["protocols"].values():
-                payloads.extend(group)
-        if "special_techniques" in self.payloads_data:
-            for group in self.payloads_data["special_techniques"].values():
-                payloads.extend(group)
-        if "client_side_template_injection" in self.payloads_data:
-            for group in self.payloads_data["client_side_template_injection"].values():
-                payloads.extend(group)
-        if "advanced_bypass" in self.payloads_data:
-            for group in self.payloads_data["advanced_bypass"].values():
-                payloads.extend(group)
-        if "length_limited" in self.payloads_data:
-            for group in self.payloads_data["length_limited"].values():
-                payloads.extend(group)
-
         return payloads
 
     def test_payload(
-        self,
-        url: str,
-        base_params: Dict,
-        param_name: str,
-        payload: str,
-        method: str = "GET",
-    ) -> Tuple[bool, str, Dict]:
+        self, url: str, params: Dict, payload: str, method: str = "GET"
+    ) -> Tuple[bool, str]:
         """
-        단일 페이로드 테스트 (토큰화된 페이로드, 증거 캡처)
+        단일 페이로드 테스트
 
         Returns:
-            (is_vulnerable, detected_context, evidence)
-            evidence: { 'request': {method, url, params, headers}, 'response_snippet': str }
+            (is_vulnerable, detected_context)
         """
-        # Only refresh tokens if this looks like it needs CSRF handling
-        if method.upper() == "POST" or any(
-            k in ''.join(base_params.keys()).lower() for k in TOKEN_KEYWORDS
-        ):
-            self._refresh_tokens(url, base_params, method)
-
-        test_params = base_params.copy()
-
-        # create a short unique token so we can detect reflection reliably
-        token = f"s2n_{int(time.time() * 1000)}"
-
-        # Attach token into payload to help detect reflection even if payload is transformed
-        payload_with_token = f"{payload}<!--{token}-->"
-        test_params[param_name] = payload_with_token
-
-        evidence = {"request": {}, "response_snippet": ""}
+        test_params = params.copy()
 
         try:
             if method.upper() == "POST":
-                req = self.session.prepare_request(
-                    requests.Request("POST", url, data=test_params)
+                response = self.session.post(
+                    url, data=test_params, timeout=self.timeout
                 )
-                resp = self.session.send(req, timeout=self.timeout)
-                resp.encoding = resp.apparent_encoding
+                # Ensure correct encoding detection
+                response.encoding = response.apparent_encoding
             else:
-                req = self.session.prepare_request(
-                    requests.Request("GET", url, params=test_params)
+                response = self.session.get(
+                    url, params=test_params, timeout=self.timeout
                 )
-                resp = self.session.send(req, timeout=self.timeout)
-                resp.encoding = resp.apparent_encoding
+                # Ensure correct encoding detection
+                response.encoding = response.apparent_encoding
 
-            # Capture minimal request details for evidence
-            sent_url = resp.request.url
-            sent_method = resp.request.method
-            sent_headers = dict(resp.request.headers)
-            sent_body = resp.request.body if hasattr(resp.request, "body") else None
+            # 응답에서 페이로드 확인
+            import html
 
-            evidence["request"] = {
-                "method": sent_method,
-                "url": sent_url,
-                "headers": sent_headers,
-                "body": sent_body,
-            }
+            escaped = html.escape(payload)
+            # Combine redirect chain and final page for more accurate detection
+            final_html = response.text
+            if response.history:
+                for hist in response.history:
+                    hist.encoding = hist.apparent_encoding
+                    final_html += hist.text
 
-            final_html = resp.text
+            # POST 실행 후 토큰이 갱신되는 경우를 대비해 params 업데이트
+            self._update_tokens_from_html(final_html, params)
 
-            # For token detection check both raw payload and token string
-            if payload in final_html:
+            if payload in final_html or escaped in final_html:
+                # 컨텍스트 감지
                 context = self.detect_context(final_html, payload)
-                # include snippet around first match
-                idx = final_html.find(payload)
-                start = max(0, idx - 120)
-                evidence["response_snippet"] = final_html[start : start + 240]
-                return True, context, evidence
+                return True, context
 
-            if token in final_html:
-                # token is reflected but original payload not present => lower confidence
-                context = "token_reflection"
-                idx = final_html.find(token)
-                start = max(0, idx - 120)
-                evidence["response_snippet"] = final_html[start : start + 240]
-                return False, context, evidence
-
-            # Not found
-            return False, "", evidence
+            return False, ""
 
         except Exception as e:
-            # In error case return not vulnerable with empty evidence
-            return False, "", evidence
+            return False, ""
 
     def detect_context(self, html: str, payload: str) -> str:
         """
@@ -839,7 +764,6 @@ class S2NXSSPlugin:
                             "method": method,
                         },
                         "successful_payloads": [],
-                        "observations": [],
                         "first_detected": time.strftime("%Y-%m-%d %H:%M:%S"),
                         "xss_type": "Reflected XSS",
                     }
@@ -847,15 +771,12 @@ class S2NXSSPlugin:
                 successful_count = 0
                 for payload in payloads:
                     self.total_payload_tests += 1
-                    is_vulnerable, context, evidence = self.test_payload(
-                        url, params, param_name, payload, method
-                    )
+                    test_params = dict(params)
+                    test_params[param_name] = payload
 
-                    # attach evidence to any positive or token-reflection case
-                    if evidence and evidence.get("request"):
-                        # store the latest evidence snapshot on the location group
-                        self.grouped_vulnerabilities[location_key].setdefault("evidence", [])
-                        self.grouped_vulnerabilities[location_key]["evidence"].append(evidence)
+                    is_vulnerable, context = self.test_payload(
+                        url, test_params, payload, method
+                    )
 
                     if is_vulnerable:
                         successful_count += 1
@@ -871,23 +792,9 @@ class S2NXSSPlugin:
                         self.grouped_vulnerabilities[location_key][
                             "successful_payloads"
                         ].append(payload_info)
-                    else:
-                        # token reflection or escaped observation
-                        if context == "escaped" or context == "token_reflection":
-                            category_info = PayloadCategorizer.categorize_payload(payload)
-                            obs_info = {
-                                "payload": payload,
-                                "context": context,
-                                "category": category_info["category"],
-                                "category_ko": category_info["category_ko"],
-                                "description": category_info["description"],
-                                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "confidence": "LOW",
-                            }
-                            self.grouped_vulnerabilities[location_key]["observations"].append(obs_info)
 
                 print(f"  [+] {successful_count}/{len(payloads)} payloads successful")
-                if successful_count == 0 and not self.grouped_vulnerabilities[location_key].get("observations"):
+                if successful_count == 0:
                     self.grouped_vulnerabilities.pop(location_key, None)
                     continue
 
@@ -906,7 +813,7 @@ class S2NXSSPlugin:
 
     def _rebuild_results(self) -> List[Dict]:
         """
-        그룹핑된 취약점 정보를 기반으로 고유한 결과 리스트를 생성 (summary-only)
+        그룹핑된 취약점 정보를 기반으로 고유한 결과 리스트를 생성
         """
         rebuilt_results = []
 
@@ -919,40 +826,74 @@ class S2NXSSPlugin:
             severity, cvss = XSS_SEVERITY_PROFILES.get(xss_type, ("HIGH", 7.5))
 
             payload_example = ""
-            has_confirmed = bool(vuln.get("successful_payloads"))
-            if has_confirmed:
+            context_detected = ""
+            if vuln["successful_payloads"]:
                 payload_example = vuln["successful_payloads"][0].get("payload", "")
-            # always produce summary entry
-            first_evidence_payload = payload_example
-            # if no confirmed payload, check observations or evidence
-            if not first_evidence_payload:
-                obs = vuln.get('observations', [])
-                if obs:
-                    first_evidence_payload = obs[0].get('payload', '')
-                elif vuln.get('evidence'):
-                    first_evidence_payload = vuln.get('evidence')[0].get('response_snippet', '')
+                context_detected = vuln["successful_payloads"][0].get("context", "")
 
-            fix_text = None
-            # attempt to read existing fix_recommendation if present
-            fix_candidate = vuln.get('fix_recommendation')
-            if isinstance(fix_candidate, dict):
-                fix_text = fix_candidate.get('english')
-            elif isinstance(fix_candidate, str):
-                fix_text = fix_candidate
+            injection_point = f"{method} {url}"
+            if parameter and parameter not in ["dom_source"]:
+                if method.upper() == "GET":
+                    injection_point += (
+                        f"?{parameter}={payload_example}"
+                        if payload_example
+                        else f"?{parameter}=<payload>"
+                    )
+                else:
+                    injection_point += f" ({parameter})"
+            elif parameter == "dom_source" or xss_type == "DOM XSS":
+                injection_point += " (DOM context)"
 
-            if not fix_text:
-                fix_text = "Validate and HTML-encode user input on output."
+            human_parameter = parameter or "N/A"
+            human_parameter_ko = parameter or "N/A"
+            if parameter == "dom_source" or xss_type == "DOM XSS":
+                human_parameter = "DOM context"
+                human_parameter_ko = "DOM 컨텍스트"
 
-            rebuilt_results.append({
-                'url': url,
-                'parameter': parameter,
-                'severity': severity,
-                'cvss_score': cvss,
-                'xss_type': xss_type,
-                'evidence': {'payload_used': first_evidence_payload},
-                'fix_recommendation': fix_text,
-                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-            })
+            rebuilt_results.append(
+                {
+                    "scanner": "s2n-xss",
+                    "vulnerability_type": "Cross-Site Scripting (XSS)",
+                    "vulnerability_type_ko": "크로스 사이트 스크립팅 (XSS)",
+                    "severity": severity,
+                    "cvss_score": cvss,
+                    "location": location,
+                    "xss_type": xss_type,
+                    "evidence": {
+                        "payload_used": payload_example,
+                        "context_detected": context_detected,
+                        "injection_point": injection_point,
+                    },
+                    "description": {
+                        "korean": f"'{human_parameter_ko}' 위치에서 {xss_type} 취약점이 확인되었습니다.",
+                        "english": f"{xss_type} detected at {human_parameter}.",
+                    },
+                    "impact": {
+                        "korean": [
+                            "사용자 세션 쿠키 탈취",
+                            "사용자 계정 권한으로 악의적 행위 수행",
+                            "피싱 페이지로 리다이렉트",
+                            "사용자 입력 정보 탈취",
+                        ],
+                        "english": [
+                            "Session cookie theft",
+                            "Unauthorized actions with user privileges",
+                            "Redirection to phishing pages",
+                            "User input data exfiltration",
+                        ],
+                    },
+                    "fix_recommendation": {
+                        "korean": "모든 사용자 입력값을 검증하고, 출력 시 HTML 이스케이프 처리를 적용하세요.",
+                        "english": "Validate all user inputs and apply HTML escaping on output.",
+                    },
+                    "references": [
+                        "https://owasp.org/www-community/attacks/xss/",
+                        "https://portswigger.net/web-security/cross-site-scripting",
+                        "https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html",
+                    ],
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                }
+            )
 
         self.results = rebuilt_results
         return rebuilt_results
@@ -1021,14 +962,13 @@ if __name__ == "__main__":
 
         if is_dvwa:
             security = (
-                input(
-                    "[>] Security level (low/medium/high/impossible, leave blank to keep server setting): "
-                )
+                input("[>] Security level (low/medium/high, default=low): ")
                 .strip()
                 .lower()
             )
-            if security in ["low", "medium", "high", "impossible"]:
-                cookies["security"] = security
+            cookies["security"] = (
+                security if security in ["low", "medium", "high"] else "low"
+            )
 
         print(f"\n[+] Cookies configured: {list(cookies.keys())}")
     else:
@@ -1059,7 +999,6 @@ if __name__ == "__main__":
             cookies=cookies,
             timeout=10,
             auto_detect=auto_detect,
-            output_mode='summary',
         )
     except Exception as e:
         print(f"\n[ERROR] Failed to initialize: {e}")
@@ -1116,19 +1055,41 @@ if __name__ == "__main__":
                 if count > 0:
                     print(f"  {sev}: {count}")
 
+        result_lookup = {}
+        for res in results:
+            loc = res.get("location", {})
+            key = f"{loc.get('url')}|{loc.get('parameter')}|{loc.get('method')}"
+            result_lookup[key] = res
+
         print("\n" + "-" * 70)
         print("Detected Vulnerabilities:")
         print("-" * 70)
 
-        for res in results:
-            print(f"\n[+] URL: {res['url']}")
-            print(f"    Parameter : {res['parameter']}")
-            print(f"    Severity  : {res['severity']} (CVSS {res['cvss_score']})")
-            print(f"    Type      : {res['xss_type']}")
-            print(f"    Payload   : {res['evidence'].get('payload_used', '')}")
-            print(f"    Fix       : {res.get('fix_recommendation')}")
-            print(f"    Detected  : {res['timestamp']}")
-            print("-" * 70)
+        for i, (location_key, vuln_data) in enumerate(
+            scanner.grouped_vulnerabilities.items(), 1
+        ):
+            print(f"\n[{i}] {vuln_data['location']['url']}")
+            print(f"    Parameter: {vuln_data['location']['parameter']}")
+            print(f"    Method: {vuln_data['location']['method']}")
+            print(f"    Successful payloads: {len(vuln_data['successful_payloads'])}")
+
+            res_meta = result_lookup.get(location_key, {})
+            severity = res_meta.get("severity", "UNKNOWN")
+            cvss = res_meta.get("cvss_score", "N/A")
+            vuln_type = res_meta.get("xss_type", "Unknown")
+            print(f"    Severity: {severity} (CVSS {cvss})")
+            print(f"    Type: {vuln_type}")
+
+            # 카테고리별 분류
+            categories = {}
+            for p in vuln_data["successful_payloads"]:
+                cat = p["category_ko"]
+                categories[cat] = categories.get(cat, 0) + 1
+
+            categories_line = (
+                ", ".join(f"{k}({v})" for k, v in categories.items()) if categories else "-"
+            )
+            print(f"    Categories: {categories_line}")
 
     print("\n" + "=" * 70)
     print("Scan Complete")
