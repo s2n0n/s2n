@@ -1,1138 +1,454 @@
-"""
-s2n-xss: XSS Vulnerability Scanner
-Developer-friendly XSS detection optimized for Korean web applications
+from __future__ import annotations
 
-Features:
-- ✨ Cross-Site Scripting (XSS) detection
-- ✨ Interactive scanning mode
-- ✨ Context-aware payload selection
-- ✨ Korean encoding issue detection (UTF-8, EUC-KR, fullwidth chars)
-- ✨ Developer-friendly detailed reports with fix recommendations
-- ✨ Lightweight and CI/CD friendly
-- ✨ Automatic input point detection (no need to specify parameters manually)
-- ✨ HTML form auto-parsing for DVWA and other web applications
-- ✨ POST/GET method auto-detection
-"""
-
+import sys
+import html
 import json
-import requests
-import re
-from urllib.parse import urlencode, urlparse, parse_qs, urljoin
-from typing import Dict, List, Tuple, Optional
-from html.parser import HTMLParser
 import time
+import re
+from dataclasses import dataclass, field
+from html.parser import HTMLParser
+from typing import Dict, List, Optional
+from urllib.parse import parse_qs, urljoin, urlparse
+from pathlib import Path
+
+import requests
 
 TOKEN_KEYWORDS = ("token", "csrf", "nonce")
-XSS_SEVERITY_PROFILES = {
-    "Stored XSS": ("HIGH", 8.8),
-    "Reflected XSS": ("HIGH", 7.4),
-    "DOM XSS": ("MEDIUM", 6.5),
-}
+DEFAULT_TIMEOUT = 10
+USER_AGENT = "s2n-xss/2.3 (Reflected Scanner)"
+
+
+# ============================================================
+# HTML form parser
+# ============================================================
+
 
 class FormParser(HTMLParser):
-    """
-    자동 입력 지점 탐지를 위해 HTML에서 폼과 입력 필드를 추출하는 파서
-    """
+    """Extract forms and their input fields."""
 
     def __init__(self):
         super().__init__()
-        self.forms = []
-        self.current_form = None
+        self.forms: List[Dict] = []
+        self._current: Optional[Dict] = None
 
     def handle_starttag(self, tag, attrs):
         attrs_dict = dict(attrs)
 
         if tag == "form":
-            self.current_form = {
+            self._current = {
                 "action": attrs_dict.get("action", ""),
                 "method": attrs_dict.get("method", "GET").upper(),
                 "inputs": [],
             }
-
-        elif tag in ["input", "textarea", "select"] and self.current_form is not None:
-            input_field = {
-                "type": attrs_dict.get("type", "text"),
-                "name": attrs_dict.get("name", ""),
-                "value": attrs_dict.get("value", ""),
-                "tag": tag,
-            }
-
-            if input_field["name"]:
-                self.current_form["inputs"].append(input_field)
+        elif tag in {"input", "textarea", "select"} and self._current is not None:
+            name = attrs_dict.get("name", "")
+            if not name:
+                return
+            input_type = attrs_dict.get("type", "text").lower()
+            self._current["inputs"].append(
+                {
+                    "type": input_type,
+                    "name": name,
+                    "value": attrs_dict.get("value", ""),
+                }
+            )
 
     def handle_endtag(self, tag):
-        if tag == "form" and self.current_form is not None:
-            self.forms.append(self.current_form)
-            self.current_form = None
+        if tag == "form" and self._current is not None:
+            self.forms.append(self._current)
+            self._current = None
+
+
+# ============================================================
+# Input point detector
+# ============================================================
 
 
 class InputPointDetector:
-    """
-    웹 페이지에서 입력 지점을 자동으로 탐지
-    URL 파라미터, HTML 폼을 자동으로 찾아냄
-    """
+    """Locate URL parameters and HTML form inputs."""
 
     def __init__(self, session: requests.Session):
         self.session = session
 
-    def detect_input_points(self, url: str) -> List[Dict]:
-        """
-        URL에서 모든 입력 지점을 탐지
+    def detect(self, url: str) -> List["InputPoint"]:
+        points: List[InputPoint] = []
 
-        Returns:
-            [{url, method, params, source}, ...]
-        """
-        input_points = []
-
-        # 1. URL 파라미터 추출
+        # URL query string parameters
         parsed = urlparse(url)
         url_params = parse_qs(parsed.query)
         if url_params:
-            params = {
-                k: v[0] if isinstance(v, list) else v for k, v in url_params.items()
-            }
-            input_points.append(
-                {
-                    "url": url.split("?")[0],
-                    "method": "GET",
-                    "params": params,
-                    "source": "url",
-                }
+            params = {k: v[0] if isinstance(v, list) else v for k, v in url_params.items()}
+            points.append(
+                InputPoint(
+                    url=parsed._replace(query="").geturl(),
+                    method="GET",
+                    parameters=params,
+                    source="url",
+                )
             )
 
-        # 2. HTML 폼 파싱
+        # HTML forms
         try:
-            response = self.session.get(url, timeout=10)
+            response = self.session.get(url, timeout=DEFAULT_TIMEOUT)
             if response.status_code == 200:
                 parser = FormParser()
                 parser.feed(response.text)
-
                 for form in parser.forms:
-                    if form["inputs"]:
-                        action_url = (
-                            urljoin(url, form["action"]) if form["action"] else url
-                        )
+                    params = {}
+                    for field in form["inputs"]:
+                        name = field["name"]
+                        value = field["value"] or "test"
+                        field_type = field["type"].lower()
 
-                        params = {}
-                        for inp in form["inputs"]:
-                            # submit 버튼은 제외
-                            input_type = inp["type"].lower()
-                            name = inp["name"]
-                            if not name:
-                                continue
+                        if field_type in {"submit", "button"}:
+                            params[name] = field["value"] or name
+                            continue
 
-                            if input_type in ["submit", "button"]:
-                                params[name] = inp["value"] if inp["value"] else name
-                                continue
+                        if field_type == "hidden":
+                            params[name] = field["value"]
+                        else:
+                            params[name] = value
 
-                            params[name] = inp["value"] if inp["value"] else "test"
-
-                            # ✨ Preserve hidden inputs like user_token
-                            if input_type == "hidden":
-                                params[name] = inp["value"]
-
-                        if params:
-                            input_points.append(
-                                {
-                                    "url": action_url,
-                                    "method": form["method"],
-                                    "params": params,
-                                    "source": "form",
-                                }
+                    if params:
+                        action = form["action"]
+                        target = urljoin(url, action) if action else url
+                        points.append(
+                            InputPoint(
+                                url=target,
+                                method=form["method"],
+                                parameters=params,
+                                source="form",
                             )
-        except Exception as e:
-            print(f"  [!] Error detecting forms: {e}")
-
-        return input_points
-
-
-class DOMXSSDetector:
-    """
-    DOM 기반 XSS를 탐지하기 위한 간단한 정적 분석기
-    """
-
-    DANGEROUS_SOURCES = [
-        r"location\.hash",
-        r"location\.search",
-        r"location\.href",
-        r"document\.URL",
-        r"document\.documentURI",
-        r"document\.referrer",
-        r"window\.name",
-    ]
-
-    DANGEROUS_SINKS = [
-        r"document\.write\s*\(",
-        r"document\.writeln\s*\(",
-        r"\.innerHTML\s*=",
-        r"\.outerHTML\s*=",
-        r"eval\s*\(",
-        r"setTimeout\s*\(",
-        r"setInterval\s*\(",
-        r"Function\s*\(",
-    ]
-
-    def detect_dom_xss(self, html: str) -> List[Tuple[str, str]]:
-        """
-        HTML 문서에서 위험한 소스/싱크 조합을 찾아 DOM XSS 가능성을 반환
-        """
-        findings: List[Tuple[str, str]] = []
-        script_pattern = r"<script[^>]*>(.*?)</script>"
-        scripts = re.findall(script_pattern, html, re.DOTALL | re.IGNORECASE)
-
-        for script in scripts:
-            sources = [
-                pattern
-                for pattern in self.DANGEROUS_SOURCES
-                if re.search(pattern, script)
-            ]
-            sinks = [
-                pattern for pattern in self.DANGEROUS_SINKS if re.search(pattern, script)
-            ]
-            for source in sources:
-                for sink in sinks:
-                    findings.append((source, sink))
-
-        return findings
-
-
-class StoredXSSDetector:
-    """
-    저장형 XSS 탐지를 위한 도우미
-    """
-
-    EXCLUDED_FIELDS = {"submit", "btnsign"}
-
-    def __init__(self, session: requests.Session):
-        self.session = session
-
-    @staticmethod
-    def _update_tokens_from_html(html: str, data: Dict[str, str]) -> None:
-        parser = FormParser()
-        parser.feed(html)
-        for form in parser.forms:
-            for inp in form["inputs"]:
-                name = inp["name"]
-                if not name:
-                    continue
-                lower = name.lower()
-                if any(keyword in lower for keyword in TOKEN_KEYWORDS):
-                    data[name] = inp.get("value", "")
-
-    def test_stored_xss(
-        self, url: str, form_data: Dict[str, str], method: str
-    ) -> Tuple[bool, str]:
-        unique_id = f"s2n_stored_{int(time.time())}"
-        payload = f"<script>alert('{unique_id}')</script>"
-
-        test_data = form_data.copy() if form_data else {}
-
-        try:
-            response = self.session.get(url, timeout=10)
-            response.encoding = response.apparent_encoding
-            self._update_tokens_from_html(response.text, test_data)
+                        )
         except Exception:
             pass
 
-        for key in list(test_data.keys()):
-            lower = key.lower()
-            if lower in self.EXCLUDED_FIELDS or any(
-                keyword in lower for keyword in TOKEN_KEYWORDS
-            ):
-                continue
-            test_data[key] = payload
+        return points
 
-        try:
-            if method.upper() == "POST":
-                send_resp = self.session.post(url, data=test_data, timeout=10)
-                send_resp.encoding = send_resp.apparent_encoding
-            else:
-                send_resp = self.session.get(url, params=test_data, timeout=10)
-                send_resp.encoding = send_resp.apparent_encoding
-
-            self._update_tokens_from_html(send_resp.text, test_data)
-
-            time.sleep(0.8)
-            verify_resp = self.session.get(url, timeout=10)
-            verify_resp.encoding = verify_resp.apparent_encoding
-            body = verify_resp.text
-
-            if payload in body or unique_id in body:
-                return True, payload
-
-            return False, payload
-        except Exception:
-            return False, payload
 
 # ============================================================
-# ✨ Payload Categorizer (페이로드 분류기)
+# Data structures
 # ============================================================
-class PayloadCategorizer:
-    """
-    페이로드를 카테고리별로 분류하여 더 나은 리포트 생성
-    """
 
-    @staticmethod
-    def categorize_payload(payload: str) -> Dict[str, str]:
-        """
-        페이로드를 카테고리로 분류
 
-        Returns:
-            {
-                'category': 'basic_script' | 'event_handler' | 'encoding' | ...,
-                'category_ko': '기본 스크립트' | '이벤트 핸들러' | ...,
-                'description': '설명'
-            }
-        """
-        payload_lower = payload.lower()
+@dataclass
+class InputPoint:
+    url: str
+    method: str
+    parameters: Dict[str, str]
+    source: str
 
-        # 1. 기본 스크립트 태그
-        if (
-            "<script>" in payload_lower
-            and "fromcharcode" not in payload_lower
-            and "atob" not in payload_lower
-        ):
-            return {
-                "category": "basic_script",
-                "category_ko": "기본 스크립트 태그",
-                "description": "Standard <script> tag injection",
-            }
 
-        # 2. 이벤트 핸들러
-        if any(
-            event in payload_lower
-            for event in [
-                "onerror",
-                "onload",
-                "onfocus",
-                "onclick",
-                "onmouseover",
-                "ontoggle",
-            ]
-        ):
-            return {
-                "category": "event_handler",
-                "category_ko": "이벤트 핸들러",
-                "description": "HTML event handler exploitation",
-            }
+@dataclass
+class PayloadResult:
+    payload: str
+    context: str
+    category: str
+    category_ko: str
+    description: str
 
-        # 3. 인코딩 우회
-        if any(enc in payload for enc in ["%", "\\u", "\\x", "&#", "&lt;", "&gt;"]):
-            return {
-                "category": "encoding_bypass",
-                "category_ko": "인코딩 우회",
-                "description": "Encoded payload to bypass filters",
-            }
 
-        # 4. 난독화
-        if (
-            "fromcharcode" in payload_lower
-            or "atob" in payload_lower
-            or "eval" in payload_lower
-        ):
-            return {
-                "category": "obfuscation",
-                "category_ko": "난독화",
-                "description": "Obfuscated JavaScript code",
-            }
+@dataclass
+class Finding:
+    url: str
+    parameter: str
+    method: str
+    matches: List[PayloadResult] = field(default_factory=list)
 
-        # 5. 공백 우회
-        if any(char in payload for char in ["/", "\t", "\n"]) and "<" in payload:
-            return {
-                "category": "whitespace_bypass",
-                "category_ko": "공백 문자 우회",
-                "description": "Alternative whitespace characters",
-            }
-
-        # 6. 한글/인코딩 특화
-        if any(
-            pattern in payload
-            for pattern in ["EUC-KR", "테스트", "한글", "가나다", "%C5%", "%D7%"]
-        ):
-            return {
-                "category": "korean_encoding",
-                "category_ko": "한글 인코딩",
-                "description": "Korean encoding specific payload",
-            }
-
-        # 7. 대소문자 혼합
-        if "<script>" not in payload_lower and "<script" in payload_lower:
-            return {
-                "category": "case_variation",
-                "category_ko": "대소문자 변형",
-                "description": "Mixed case to bypass filters",
-            }
-
-        # 8. HTML 주석 우회
-        if "<!--" in payload or "//-->" in payload:
-            return {
-                "category": "comment_bypass",
-                "category_ko": "HTML 주석 우회",
-                "description": "HTML comment manipulation",
-            }
-
-        # 기타
+    def as_dict(self) -> Dict:
         return {
-            "category": "other",
-            "category_ko": "기타",
-            "description": "Other XSS technique",
+            "url": self.url,
+            "parameter": self.parameter,
+            "method": self.method,
+            "successful_payloads": [result.__dict__ for result in self.matches],
         }
 
 
 # ============================================================
-# S2NXSSPlugin 클래스 (개선된 버전)
+# Main scanner
 # ============================================================
 
 
-class S2NXSSPlugin:
-    """
-    s2n-xss 코어 엔진
-
-    ✨ IMPROVED v2.1:
-    - 동일 위치 취약점 그룹핑
-    - 페이로드 카테고리 분류
-    - 향상된 리포트 구조
-    """
-
-    def __init__(
-        self,
-        payloads_path: str,
-        cookies: Optional[Dict] = None,
-        timeout: int = 10,
-        auto_detect: bool = True,
-        output_mode: str = 'summary',
-    ):
-        """
-        Args:
-            payloads_path: 페이로드 JSON 파일 경로
-            cookies: 세션 쿠키 (선택)
-            timeout: 요청 타임아웃 (초)
-            auto_detect: 자동 입력 지점 탐지 활성화
-        """
-        self.timeout = timeout
-        self.auto_detect = auto_detect
-
-        # ✨ IMPROVED: 결과 저장 구조 변경 (기존: 단순 리스트 -> 새로운: 그룹핑된 딕셔너리)
-        self.results = []  # 기존 호환성을 위해 유지
-        self.grouped_vulnerabilities = {}  # ✨ 위치별로 그룹핑된 취약점
-        self.total_payload_tests = 0
-
+class ReflectedScanner:
+    def __init__(self, payloads_path: str, cookies: Optional[Dict] = None):
         self.session = requests.Session()
-
+        self.session.headers.update({"User-Agent": USER_AGENT})
         if cookies:
-            # Apply cookies (e.g., PHPSESSID, security level)
             self.session.cookies.update(cookies)
 
-        # 사용자 에이전트 설정
-        self.session.headers.update({"User-Agent": "s2n-xss/2.1 (Security Scanner)"})
-        self.output_mode = output_mode
+        with open(payloads_path, "r", encoding="utf-8") as fp:
+            payloads_json = json.load(fp)
 
-        # 페이로드 로드
-        with open(payloads_path, "r", encoding="utf-8") as f:
-            self.payloads_data = json.load(f)
+        self.payloads: List[str] = self._extract_payloads(payloads_json)
+        self.detector = InputPointDetector(self.session)
+        self.findings: Dict[str, Finding] = {}
 
-        # 탐지기 초기화
-        self.input_detector = InputPointDetector(self.session)
-        self.dom_detector = DOMXSSDetector()
-        self.stored_detector = StoredXSSDetector(self.session)
+    @staticmethod
+    def _extract_payloads(payloads_json: Dict) -> List[str]:
+        collected: List[str] = []
 
-        print(
-            f"[+] Loaded {self.payloads_data['metadata']['total_payloads']} payloads from {payloads_path}"
-        )
+        def walk(node):
+            if isinstance(node, list):
+                for item in node:
+                    walk(item)
+            elif isinstance(node, dict):
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, str):
+                collected.append(node)
 
-    def _update_tokens_from_html(self, html: str, params: Dict[str, str]) -> None:
-        """
-        폼 HTML에서 token/csrf/nonce 필드 값을 추출하여 params를 최신 상태로 유지
-        """
-        parser = FormParser()
-        parser.feed(html)
-        for form in parser.forms:
-            for inp in form["inputs"]:
-                name = inp["name"]
-                if not name:
-                    continue
-                lower = name.lower()
-                if any(keyword in lower for keyword in TOKEN_KEYWORDS):
-                    params[name] = inp.get("value", "")
+        walk(payloads_json.get("payloads", {}))
+        walk(payloads_json.get("filter_bypass", {}))
+        walk(payloads_json.get("korean_encoding_specific", {}))
+        return [payload for payload in collected if payload]
+
+    def _update_tokens(self, html_content: str, params: Dict[str, str]) -> None:
+        for keyword in TOKEN_KEYWORDS:
+            pattern = re.compile(
+                rf'name=[\"\']([^\"\']*{keyword}[^\"\']*)[\"\']\s+value=[\"\']([^\"\']+)[\"\']'
+            )
+            for match in pattern.finditer(html_content):
+                field_name, value = match.groups()
+                params[field_name] = value
 
     def _refresh_tokens(self, url: str, params: Dict[str, str], method: str) -> None:
-        """
-        요청 전 페이지를 새로 불러 최신 토큰 값을 확보
-        """
         try:
             if method.upper() == "GET":
-                resp = self.session.get(url, params=params, timeout=self.timeout)
+                response = self.session.get(url, params=params, timeout=DEFAULT_TIMEOUT)
             else:
-                resp = self.session.get(url, timeout=self.timeout)
-            resp.encoding = resp.apparent_encoding
-            self._update_tokens_from_html(resp.text, params)
-        except Exception:
-            pass
-
-    def _record_dom_vulnerabilities(self, url: str, dom_vulns: List[Tuple[str, str]]):
-        """
-        DOM 기반 취약점 결과를 그룹 구조에 반영
-        """
-        if not dom_vulns:
-            return
-
-        dom_key = f"{url}|dom_source|GET"
-        dom_group = self.grouped_vulnerabilities.get(dom_key)
-        if not dom_group:
-            dom_group = {
-                "location": {
-                    "url": url,
-                    "parameter": "dom_source",
-                    "method": "GET",
-                },
-                "successful_payloads": [],
-                "first_detected": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "xss_type": "DOM XSS",
-            }
-            self.grouped_vulnerabilities[dom_key] = dom_group
-
-        existing = {entry["payload"] for entry in dom_group["successful_payloads"]}
-
-        for source, sink in dom_vulns:
-            payload_repr = f"{source} -> {sink}"
-            if payload_repr in existing:
-                continue
-            dom_group["successful_payloads"].append(
-                {
-                    "payload": payload_repr,
-                    "context": "dom",
-                    "category": "dom_analysis",
-                    "category_ko": "DOM 분석",
-                    "description": f"Source: {source}, Sink: {sink}",
-                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                }
-            )
-            existing.add(payload_repr)
-
-    def _detect_dom_vulnerabilities(self, url: str) -> None:
-        """
-        지정한 URL에서 DOM XSS 패턴을 탐지하여 결과에 반영
-        """
-        try:
-            response = self.session.get(url, timeout=self.timeout)
+                response = self.session.get(url, timeout=DEFAULT_TIMEOUT)
             response.encoding = response.apparent_encoding
-            dom_vulns = self.dom_detector.detect_dom_xss(response.text)
-            if dom_vulns:
-                print(
-                    f"[!] DOM XSS indicator detected at {url} "
-                    f"({len(dom_vulns)} source/sink pair{'s' if len(dom_vulns) > 1 else ''})"
-                )
-                self._record_dom_vulnerabilities(url, dom_vulns)
+            self._update_tokens(response.text, params)
         except Exception:
             pass
 
-    def _promote_to_stored(
-        self, url: str, method: str, stored_payload: str, context: str = "stored"
-    ) -> None:
-        """
-        동일 URL/메서드의 취약점을 저장형으로 재분류
-        """
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        for vuln in self.grouped_vulnerabilities.values():
-            loc = vuln["location"]
-            if loc.get("url") == url and loc.get("method") == method:
-                vuln["xss_type"] = "Stored XSS"
-                for payload_entry in vuln["successful_payloads"]:
-                    payload_entry["context"] = context
-                    payload_entry.setdefault("timestamp", timestamp)
+    def _test_payload(self, point: InputPoint, param_name: str, payload: str) -> Optional[PayloadResult]:
+        params = point.parameters.copy()
+        params[param_name] = payload
 
-        location_key = f"{url}|multiple_fields|{method}"
-        stored_group = self.grouped_vulnerabilities.get(location_key)
-
-        if not stored_group:
-            stored_group = {
-                "location": {
-                    "url": url,
-                    "parameter": "multiple_fields",
-                    "method": method,
-                },
-                "successful_payloads": [],
-                "first_detected": timestamp,
-                "xss_type": "Stored XSS",
-            }
-            self.grouped_vulnerabilities[location_key] = stored_group
-
-        stored_group["xss_type"] = "Stored XSS"
-        stored_group["location"]["parameter"] = "multiple_fields"
-        existing_payloads = {
-            entry["payload"] for entry in stored_group["successful_payloads"]
-        }
-        if stored_payload not in existing_payloads:
-            stored_group["successful_payloads"].append(
-                {
-                    "payload": stored_payload,
-                    "context": context,
-                    "category": "stored_injection",
-                    "category_ko": "저장형 주입",
-                    "description": "Payload persisted across requests",
-                    "timestamp": timestamp,
-                }
-            )
-
-    def select_payloads(self) -> List[str]:
-        """
-        모든 페이로드 선택 (기본 강도: Aggressive / intensity=3)
-
-        Returns:
-            전체 페이로드 리스트
-        """
-        payloads = []
-
-        # 기본 페이로드
-        payloads.extend(self.payloads_data["payloads"]["html_context"]["basic"])
-
-        # 중급 페이로드
-        payloads.extend(
-            self.payloads_data["payloads"]["html_context"]["korean_specific"]
-        )
-        payloads.extend(
-            self.payloads_data["payloads"]["attribute_context"]["double_quote"]
-        )
-        payloads.extend(self.payloads_data["filter_bypass"]["obfuscation"])
-        payloads.extend(self.payloads_data["filter_bypass"]["space_bypass"])
-        payloads.extend(self.payloads_data["filter_bypass"]["comment_bypass"])
-        payloads.extend(self.payloads_data["korean_encoding_specific"]["euc_kr_bypass"])
-
-        # 고급 페이로드
-        payloads.extend(self.payloads_data["filter_bypass"]["encoding"])
-        payloads.extend(
-            self.payloads_data["payloads"]["attribute_context"]["single_quote"]
-        )
-        payloads.extend(self.payloads_data["payloads"]["attribute_context"]["no_quote"])
-        payloads.extend(
-            self.payloads_data["korean_encoding_specific"]["fullwidth_chars"]
-        )
-
-        # ✨ Extended sections (from enhanced PortSwigger 2025 edition)
-        if "event_handlers" in self.payloads_data:
-            for group in self.payloads_data["event_handlers"].values():
-                payloads.extend(group)
-        if "polyglots" in self.payloads_data:
-            payloads.extend(self.payloads_data["polyglots"])
-        if "waf_bypass" in self.payloads_data:
-            for group in self.payloads_data["waf_bypass"].values():
-                payloads.extend(group)
-        if "restricted_characters" in self.payloads_data:
-            for group in self.payloads_data["restricted_characters"].values():
-                payloads.extend(group)
-        if "protocols" in self.payloads_data:
-            for group in self.payloads_data["protocols"].values():
-                payloads.extend(group)
-        if "special_techniques" in self.payloads_data:
-            for group in self.payloads_data["special_techniques"].values():
-                payloads.extend(group)
-        if "client_side_template_injection" in self.payloads_data:
-            for group in self.payloads_data["client_side_template_injection"].values():
-                payloads.extend(group)
-        if "advanced_bypass" in self.payloads_data:
-            for group in self.payloads_data["advanced_bypass"].values():
-                payloads.extend(group)
-        if "length_limited" in self.payloads_data:
-            for group in self.payloads_data["length_limited"].values():
-                payloads.extend(group)
-
-        return payloads
-
-    def test_payload(
-        self,
-        url: str,
-        base_params: Dict,
-        param_name: str,
-        payload: str,
-        method: str = "GET",
-    ) -> Tuple[bool, str, Dict]:
-        """
-        단일 페이로드 테스트 (토큰화된 페이로드, 증거 캡처)
-
-        Returns:
-            (is_vulnerable, detected_context, evidence)
-            evidence: { 'request': {method, url, params, headers}, 'response_snippet': str }
-        """
-        # Only refresh tokens if this looks like it needs CSRF handling
-        if method.upper() == "POST" or any(
-            k in ''.join(base_params.keys()).lower() for k in TOKEN_KEYWORDS
-        ):
-            self._refresh_tokens(url, base_params, method)
-
-        test_params = base_params.copy()
-
-        # create a short unique token so we can detect reflection reliably
-        token = f"s2n_{int(time.time() * 1000)}"
-
-        # Attach token into payload to help detect reflection even if payload is transformed
-        payload_with_token = f"{payload}<!--{token}-->"
-        test_params[param_name] = payload_with_token
-
-        evidence = {"request": {}, "response_snippet": ""}
+        self._refresh_tokens(point.url, params, point.method)
 
         try:
-            if method.upper() == "POST":
-                req = self.session.prepare_request(
-                    requests.Request("POST", url, data=test_params)
-                )
-                resp = self.session.send(req, timeout=self.timeout)
-                resp.encoding = resp.apparent_encoding
+            if point.method.upper() == "POST":
+                response = self.session.post(point.url, data=params, timeout=DEFAULT_TIMEOUT)
             else:
-                req = self.session.prepare_request(
-                    requests.Request("GET", url, params=test_params)
-                )
-                resp = self.session.send(req, timeout=self.timeout)
-                resp.encoding = resp.apparent_encoding
+                response = self.session.get(point.url, params=params, timeout=DEFAULT_TIMEOUT)
 
-            # Capture minimal request details for evidence
-            sent_url = resp.request.url
-            sent_method = resp.request.method
-            sent_headers = dict(resp.request.headers)
-            sent_body = resp.request.body if hasattr(resp.request, "body") else None
+            response.encoding = response.apparent_encoding
+            body = response.text
 
-            evidence["request"] = {
-                "method": sent_method,
-                "url": sent_url,
-                "headers": sent_headers,
-                "body": sent_body,
-            }
+            if payload not in body:
+                return None
 
-            final_html = resp.text
+            context = self._detect_context(body, payload)
+            category = "reflected"
+            category_ko = "반사형"
+            description = "Payload echoed without encoding"
 
-            # For token detection check both raw payload and token string
-            if payload in final_html:
-                context = self.detect_context(final_html, payload)
-                # include snippet around first match
-                idx = final_html.find(payload)
-                start = max(0, idx - 120)
-                evidence["response_snippet"] = final_html[start : start + 240]
-                return True, context, evidence
+            return PayloadResult(
+                payload=payload,
+                context=context,
+                category=category,
+                category_ko=category_ko,
+                description=description,
+            )
+        except Exception:
+            return None
 
-            if token in final_html:
-                # token is reflected but original payload not present => lower confidence
-                context = "token_reflection"
-                idx = final_html.find(token)
-                start = max(0, idx - 120)
-                evidence["response_snippet"] = final_html[start : start + 240]
-                return False, context, evidence
-
-            # Not found
-            return False, "", evidence
-
-        except Exception as e:
-            # In error case return not vulnerable with empty evidence
-            return False, "", evidence
-
-    def detect_context(self, html: str, payload: str) -> str:
-        """
-        페이로드가 삽입된 컨텍스트 감지
-
-        Returns:
-            'html', 'attribute', 'javascript', 'korean_euc_kr' 등
-        """
-        # 한글 인코딩 체크
-        if any(
-            korean in payload
-            for korean in ["한글", "테스트", "EUC-KR", "가나다", "%C5%", "%D7%"]
-        ):
-            return "korean_euc_kr"
-
-        # 속성 컨텍스트
-        if re.search(rf'<\w+[^>]*\s+\w+\s*=\s*["\']?[^"\']*{re.escape(payload)}', html):
+    @staticmethod
+    def _detect_context(body: str, payload: str) -> str:
+        escaped = html.escape(payload)
+        if f'="{payload}"' in body or f"='{payload}'" in body:
             return "attribute"
-
-        # JavaScript 컨텍스트
-        if re.search(
-            rf"<script[^>]*>.*{re.escape(payload)}.*</script>", html, re.DOTALL
-        ):
-            return "javascript"
-
-        # HTML 컨텍스트
+        if payload in body and escaped in body:
+            return "mixed"
         return "html"
 
-    def scan(
-        self,
-        target_url: str,
-        params: Optional[Dict] = None,
-        method: str = "GET",
-    ) -> List[Dict]:
-        """
-        XSS 스캔 실행 (기본 강도: Aggressive / intensity=3)
+    def _record(self, point: InputPoint, param_name: str, result: PayloadResult) -> None:
+        key = f"{point.url}|{param_name}|{point.method}"
+        finding = self.findings.get(key)
+        if not finding:
+            finding = Finding(url=point.url, parameter=param_name, method=point.method)
+            self.findings[key] = finding
+        finding.matches.append(result)
 
-        Args:
-            target_url: 대상 URL
-            params: 파라미터 (자동 탐지 시 None)
-            method: HTTP 메소드
+    def _record_stored(self, point: InputPoint, result: PayloadResult) -> None:
+        key = f"{point.url}|[stored]|{point.method}"
+        finding = self.findings.get(key)
+        if not finding:
+            finding = Finding(url=point.url, parameter="[stored]", method=point.method)
+            self.findings[key] = finding
+        finding.matches.append(result)
 
-        Returns:
-            취약점 리스트
-        """
+    def _test_stored(self, point: InputPoint) -> Optional[PayloadResult]:
+        params = point.parameters.copy()
+        unique_tag = f"s2n_stored_{int(time.time())}"
+        payload = f"<script>alert('{unique_tag}')</script>"
+
+        skip_names = {"btnsign", "btnsubmit", "btnclear", "submit"}
+
+        self._refresh_tokens(point.url, params, point.method)
+
+        updated = False
+        for name in list(params.keys()):
+            lower = name.lower()
+            if any(keyword in lower for keyword in TOKEN_KEYWORDS):
+                continue
+            if lower in skip_names:
+                continue
+            params[name] = payload
+            updated = True
+
+        if not updated:
+            return None
+
+        try:
+            if point.method.upper() == "POST":
+                response = self.session.post(point.url, data=params, timeout=DEFAULT_TIMEOUT)
+            else:
+                response = self.session.get(point.url, params=params, timeout=DEFAULT_TIMEOUT)
+
+            response.encoding = response.apparent_encoding
+            self._update_tokens(response.text, params)
+        except Exception:
+            return None
+
+        time.sleep(0.8)
+
+        try:
+            verify = self.session.get(point.url, timeout=DEFAULT_TIMEOUT)
+            verify.encoding = verify.apparent_encoding
+            body = verify.text
+            escaped = html.escape(payload)
+            if payload in body or unique_tag in body or escaped in body:
+                return PayloadResult(
+                    payload=payload,
+                    context="stored",
+                    category="stored",
+                    category_ko="저장형",
+                    description="Payload persisted and reflected on subsequent view",
+                )
+        except Exception:
+            return None
+
+        return None
+
+    def _ensure_authenticated(self, url: str) -> None:
+        try:
+            response = self.session.get(url, timeout=DEFAULT_TIMEOUT, allow_redirects=True)
+            response.encoding = response.apparent_encoding
+            final_url = response.url.lower()
+            if "login" in final_url or "dvwa" in final_url and "login" in response.text.lower():
+                print("[!] Warning: Received login page. Please supply valid authentication cookies.")
+        except Exception as exc:
+            print(f"[!] Warning: Failed to verify authentication: {exc}")
+
+    def scan(self, target_url: str, params: Optional[Dict[str, str]] = None, method: str = "GET") -> List[Dict]:
         print(f"\n[*] Target: {target_url}")
-        print(f"[*] Mode: {'AUTO' if self.auto_detect else 'MANUAL'}")
-        print(f"[*] Intensity: 3/3 (Aggressive - All payloads)")
+        points: List[InputPoint]
 
-        # 카운터 초기화
-        self.total_payload_tests = 0
-
-        # 입력 지점 탐지
-        if self.auto_detect:
-            print("\n[*] Detecting input points...")
-            input_points = self.input_detector.detect_input_points(target_url)
-            print(f"[+] Found {len(input_points)} input point(s)")
-        else:
-            if not params:
-                parsed = urlparse(target_url)
-                params = dict(parse_qs(parsed.query))
-                params = {
-                    k: v[0] if isinstance(v, list) else v for k, v in params.items()
-                }
-                target_url = target_url.split("?")[0]
-
-            input_points = [
-                {
-                    "url": target_url,
-                    "method": method,
-                    "params": params,
-                    "source": "manual",
-                }
+        if params is not None:
+            points = [
+                InputPoint(
+                    url=target_url.split("?")[0],
+                    method=method,
+                    parameters=params or {},
+                    source="manual",
+                )
             ]
+        else:
+            print("[*] Detecting input points...")
+            self._ensure_authenticated(target_url)
+            points = self.detector.detect(target_url)
+            print(f"[+] Found {len(points)} input point(s)")
 
-        if not input_points:
-            print("[!] No input points found. Attempting DOM XSS analysis...")
-            self._detect_dom_vulnerabilities(target_url)
-            return self._rebuild_results()
-
-        # 페이로드 선택 (모든 페이로드 사용)
-        payloads = self.select_payloads()
-        print(f"[*] Testing {len(payloads)} payload(s)...\n")
-
-        # 각 입력 지점 테스트
-        for idx, point in enumerate(input_points, 1):
-            url = point["url"]
-            method = point["method"]
-            params = point["params"]
-            source = point["source"]
-
-            print(f"[{idx}/{len(input_points)}] Testing: {url}")
-            print(f"    Method: {method}")
-            print(f"    Parameters: {list(params.keys())}")
-            print(f"    Source: {source}")
-
-            # Unified XSS test (Reflected-like only)
-            for param_name in list(params.keys()):
-                lower_param = param_name.lower()
-                if lower_param in ["submit", "btnsign"] or any(
-                    keyword in lower_param for keyword in TOKEN_KEYWORDS
-                ):
+        for point in points:
+            print(f"\n[+] Testing {point.url} ({point.method}) -> {list(point.parameters.keys())}")
+            for param_name in list(point.parameters.keys()):
+                lower = param_name.lower()
+                if any(keyword in lower for keyword in TOKEN_KEYWORDS):
                     continue
+                print(f"  - Parameter: {param_name}")
 
-                print(f"\n  [*] Testing parameter: {param_name}")
+                successes = 0
+                for payload in self.payloads:
+                    result = self._test_payload(point, param_name, payload)
+                    if result:
+                        successes += 1
+                        self._record(point, param_name, result)
+                print(f"    Successful payloads: {successes}")
 
-                # Unified location key
-                location_key = f"{url}|{param_name}|{method}"
+            if point.method.upper() == "POST" and point.source == "form":
+                stored_result = self._test_stored(point)
+                if stored_result:
+                    print("    Stored payload persisted")
+                    self._record_stored(point, stored_result)
 
-                if location_key not in self.grouped_vulnerabilities:
-                    self.grouped_vulnerabilities[location_key] = {
-                        "location": {
-                            "url": url,
-                            "parameter": param_name,
-                            "method": method,
-                        },
-                        "successful_payloads": [],
-                        "observations": [],
-                        "first_detected": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "xss_type": "Reflected XSS",
-                    }
+        return [finding.as_dict() for finding in self.findings.values()]
 
-                successful_count = 0
-                for payload in payloads:
-                    self.total_payload_tests += 1
-                    is_vulnerable, context, evidence = self.test_payload(
-                        url, params, param_name, payload, method
-                    )
+    def print_summary(self) -> None:
+        findings = list(self.findings.values())
+        if not findings:
+            print("\n✅ No reflected XSS detected")
+            return
 
-                    # attach evidence to any positive or token-reflection case
-                    if evidence and evidence.get("request"):
-                        # store the latest evidence snapshot on the location group
-                        self.grouped_vulnerabilities[location_key].setdefault("evidence", [])
-                        self.grouped_vulnerabilities[location_key]["evidence"].append(evidence)
+        print(f"\n⚠️  Reflected XSS detected in {len(findings)} location(s)")
+        for idx, finding in enumerate(findings, 1):
+            print(f"\n[{idx}] {finding.url}")
+            print(f"    Parameter: {finding.parameter}")
+            print(f"    Method: {finding.method}")
+            print(f"    Successful payloads: {len(finding.matches)}")
 
-                    if is_vulnerable:
-                        successful_count += 1
-                        category_info = PayloadCategorizer.categorize_payload(payload)
-                        payload_info = {
-                            "payload": payload,
-                            "context": context,
-                            "category": category_info["category"],
-                            "category_ko": category_info["category_ko"],
-                            "description": category_info["description"],
-                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        }
-                        self.grouped_vulnerabilities[location_key][
-                            "successful_payloads"
-                        ].append(payload_info)
-                    else:
-                        # token reflection or escaped observation
-                        if context == "escaped" or context == "token_reflection":
-                            category_info = PayloadCategorizer.categorize_payload(payload)
-                            obs_info = {
-                                "payload": payload,
-                                "context": context,
-                                "category": category_info["category"],
-                                "category_ko": category_info["category_ko"],
-                                "description": category_info["description"],
-                                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "confidence": "LOW",
-                            }
-                            self.grouped_vulnerabilities[location_key]["observations"].append(obs_info)
 
-                print(f"  [+] {successful_count}/{len(payloads)} payloads successful")
-                if successful_count == 0 and not self.grouped_vulnerabilities[location_key].get("observations"):
-                    self.grouped_vulnerabilities.pop(location_key, None)
-                    continue
-
-            if method.upper() == "POST" and source == "form":
-                stored_found, stored_payload = self.stored_detector.test_stored_xss(
-                    url, params, method
-                )
-                if stored_found:
-                    print("  [!] Stored payload persisted after submission")
-                    self._promote_to_stored(url, method, stored_payload)
-
-            # 추가 DOM XSS 점검 (파라미터 기반 테스트 이후)
-            self._detect_dom_vulnerabilities(url)
-
-        return self._rebuild_results()
-
-    def _rebuild_results(self) -> List[Dict]:
-        """
-        그룹핑된 취약점 정보를 기반으로 고유한 결과 리스트를 생성 (summary-only)
-        """
-        rebuilt_results = []
-
-        for vuln in self.grouped_vulnerabilities.values():
-            location = vuln["location"]
-            method = location.get("method", "GET")
-            url = location.get("url", "")
-            parameter = location.get("parameter", "")
-            xss_type = vuln.get("xss_type", "Reflected XSS")
-            severity, cvss = XSS_SEVERITY_PROFILES.get(xss_type, ("HIGH", 7.5))
-
-            payload_example = ""
-            has_confirmed = bool(vuln.get("successful_payloads"))
-            if has_confirmed:
-                payload_example = vuln["successful_payloads"][0].get("payload", "")
-            # always produce summary entry
-            first_evidence_payload = payload_example
-            # if no confirmed payload, check observations or evidence
-            if not first_evidence_payload:
-                obs = vuln.get('observations', [])
-                if obs:
-                    first_evidence_payload = obs[0].get('payload', '')
-                elif vuln.get('evidence'):
-                    first_evidence_payload = vuln.get('evidence')[0].get('response_snippet', '')
-
-            fix_text = None
-            # attempt to read existing fix_recommendation if present
-            fix_candidate = vuln.get('fix_recommendation')
-            if isinstance(fix_candidate, dict):
-                fix_text = fix_candidate.get('english')
-            elif isinstance(fix_candidate, str):
-                fix_text = fix_candidate
-
-            if not fix_text:
-                fix_text = "Validate and HTML-encode user input on output."
-
-            rebuilt_results.append({
-                'url': url,
-                'parameter': parameter,
-                'severity': severity,
-                'cvss_score': cvss,
-                'xss_type': xss_type,
-                'evidence': {'payload_used': first_evidence_payload},
-                'fix_recommendation': fix_text,
-                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-            })
-
-        self.results = rebuilt_results
-        return rebuilt_results
-
-# ============================================================
-# Interactive launcher (범용 버전)
-# ============================================================
-if __name__ == "__main__":
-    import os
-    import sys
-
-    print("\n" + "=" * 70)
-    print("s2n-xss : XSS Vulnerability Scanner")
-    print("=" * 70)
-    print("\n✨ Features:")
-    print("  ✓ Cross-Site Scripting (XSS) detection")
-    print("  ✓ Context-aware payload selection")
-    print("  ✓ Korean encoding detection (EUC-KR, fullwidth)")
-    print("  ✓ Developer-friendly reports (KR/EN)")
-    print("  ✓ Interactive mode")
-    print("  ✓ Auto input detection")
-    print()
-
-    # 페이로드 파일 경로
-    default_payload = "xss_payloads.json"
-    if not os.path.exists(default_payload):
-        default_payload = os.path.join(os.path.dirname(__file__), "xss_payloads.json")
-
-    # 1. Target URL 입력
-    print("=" * 70)
-    print("Step 1: Target URL")
-    print("=" * 70)
+def _prompt(message: str) -> str:
     try:
-        target_url = input("\n[>] Enter target URL: ").strip()
+        return input(message)
     except (KeyboardInterrupt, EOFError):
-        print("\n\nAborted by user.")
+        print("\nAborted by user.")
         sys.exit(0)
 
+
+def main() -> int:
+    payload_path = "xss_payloads.json"
+    payload_file = payload_path if Path(payload_path).exists() else Path(__file__).parent / payload_path
+
+    if not Path(payload_file).exists():
+        print(f"Payload file not found: {payload_file}")
+        return 1
+
+    print("=" * 70)
+    print("s2n-xss Reflected Scanner")
+    print("=" * 70)
+
+    target_url = _prompt("\n[>] Enter target URL: ").strip()
     if not target_url:
-        print("\n[!] No URL provided. Exiting.")
-        sys.exit(0)
+        print("No target provided.")
+        return 1
 
-    # URL 파싱하여 파라미터 확인
-    parsed = urlparse(target_url)
-    has_params = bool(parsed.query)
-
-    # 2. 인증 쿠키 입력 (필수)
-    print("\n" + "=" * 70)
-    print("Step 2: Authentication")
-    print("=" * 70)
-
-    is_dvwa = "dvwa" in target_url.lower()
-
-    if is_dvwa:
-        print("\n[*] DVWA detected!")
-        print("\nTo get cookies:")
-        print("  1. Login to DVWA (admin/password)")
-        print("  2. F12 → Application → Cookies")
-        print("  3. Copy PHPSESSID value")
-
-    phpsessid = input("\n[*] Enter PHPSESSID for authentication: ").strip()
-
+    cookies_input = _prompt("[>] Enter cookies (key=value;key2=value2) or blank: ").strip()
     cookies = None
-    if phpsessid:
-        cookies = {"PHPSESSID": phpsessid}
+    if cookies_input:
+        cookies = {}
+        for pair in cookies_input.split(";"):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                cookies[k.strip()] = v.strip()
 
-        if is_dvwa:
-            security = (
-                input(
-                    "[>] Security level (low/medium/high/impossible, leave blank to keep server setting): "
-                )
-                .strip()
-                .lower()
-            )
-            if security in ["low", "medium", "high", "impossible"]:
-                cookies["security"] = security
+    scanner = ReflectedScanner(str(payload_file), cookies)
+    results = scanner.scan(target_url)
+    scanner.print_summary()
 
-        print(f"\n[+] Cookies configured: {list(cookies.keys())}")
-    else:
-        print(
-            "[!] Warning: No PHPSESSID provided. Some targets may require authentication."
-        )
+    if results:
+        save = _prompt("\n[?] Save results to JSON? (y/N): ").strip().lower()
+        if save == "y":
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            out_path = Path.cwd() / f"xss_reflected_results_{timestamp}.json"
+            with out_path.open("w", encoding="utf-8") as fp:
+                json.dump(results, fp, ensure_ascii=False, indent=2)
+            print(f"Saved to {out_path}")
 
-    # 자동 스캔 모드 활성화 (필수)
-    auto_detect = True
-    print(f"[+] Scan Mode: AUTO (automatic input point detection enabled)")
+    return 0
 
-    if not has_params:
-        print("[*] No parameters in URL - will auto-detect forms and parameters")
 
-    # 3. 스캐너 초기화
-    print("\n" + "=" * 70)
-    print("Initializing Scanner")
-    print("=" * 70)
-
-    if not os.path.exists(default_payload):
-        print(f"\n[ERROR] Payload file not found: {default_payload}")
-        print("\nPlease ensure xss_payloads.json is in the same directory")
-        sys.exit(1)
-
-    try:
-        scanner = S2NXSSPlugin(
-            payloads_path=default_payload,
-            cookies=cookies,
-            timeout=10,
-            auto_detect=auto_detect,
-            output_mode='summary',
-        )
-    except Exception as e:
-        print(f"\n[ERROR] Failed to initialize: {e}")
-        sys.exit(1)
-
-    # 4. 스캔 실행
-    print("\n" + "=" * 70)
-    print("Starting Scan")
-    print("=" * 70)
-
-    try:
-        start_time = time.time()
-        results = scanner.scan(target_url=target_url, params=None, method="GET")
-        elapsed = time.time() - start_time
-    except KeyboardInterrupt:
-        print("\n\n[!] Scan interrupted by user")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n[ERROR] Scan failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        sys.exit(1)
-
-    # 6. 결과 출력
-    print("\n" + "=" * 70)
-    print("SCAN RESULTS")
-    print("=" * 70)
-    print(f"\nScan completed in {elapsed:.1f} seconds")
-    print(f"Target: {target_url}")
-
-    if not results:
-        print("\n✅ No XSS vulnerabilities detected")
-        print("\nPossible reasons:")
-        print("  - Target is properly secured")
-        print("  - No input points found (check authentication)")
-        print("  - Filters are blocking payloads")
-    else:
-        unique_locations = len(scanner.grouped_vulnerabilities)
-        print(
-            f"\nSummary: {len(results)} finding(s) across {unique_locations} vulnerable location(s)"
-        )
-
-        # 심각도별 분류
-        severity_count = {}
-        for vuln in results:
-            sev = vuln["severity"]
-            severity_count[sev] = severity_count.get(sev, 0) + 1
-
-        if severity_count:
-            print("\nSeverity distribution:")
-            for sev in ["CRITICAL", "HIGH", "MEDIUM", "LOW"]:
-                count = severity_count.get(sev, 0)
-                if count > 0:
-                    print(f"  {sev}: {count}")
-
-        print("\n" + "-" * 70)
-        print("Detected Vulnerabilities:")
-        print("-" * 70)
-
-        for res in results:
-            print(f"\n[+] URL: {res['url']}")
-            print(f"    Parameter : {res['parameter']}")
-            print(f"    Severity  : {res['severity']} (CVSS {res['cvss_score']})")
-            print(f"    Type      : {res['xss_type']}")
-            print(f"    Payload   : {res['evidence'].get('payload_used', '')}")
-            print(f"    Fix       : {res.get('fix_recommendation')}")
-            print(f"    Detected  : {res['timestamp']}")
-            print("-" * 70)
-
-    print("\n" + "=" * 70)
-    print("Scan Complete")
-    print("=" * 70)
-    print()
-
-    sys.exit(0 if not results else len(results))
+if __name__ == "__main__":
+    sys.exit(main())
