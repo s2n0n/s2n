@@ -10,7 +10,7 @@ class Severity(str, Enum):
     CRITICAL = "CRITICAL"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class Finding:
     id: str                 # 고유 식별자 (예: UUID, 해시 등)
     plugin: str             # 탐지한 플러그인 이름 (예: "xss", "sqlinjection")
