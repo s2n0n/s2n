@@ -14,9 +14,12 @@ import time
 import urllib.parse
 from typing import Set, List
 from collections import deque
+from s2n.core.s2nscanner.crawler import crawl_recursive
+from s2n.core.s2nscanner.auth.dvwa_adapter import DVWAAdapter
+
 
 try:
-    from core.s2nscanner.http.client import HttpClient
+    from s2n.core.s2nscanner.http.client import HttpClient
 except Exception:
     from ..http.client import HttpClient  # type: ignore
 
@@ -35,48 +38,6 @@ PATTERNS = [
     r"linux", r"ubuntu",
 ]
 COMMON_PARAMS = ["id", "cmd", "ip", "input", "search", "q", "page", "file"]
-
-
-# 크롤러: 내부 링크 재귀 탐색
-def crawl_recursive(base_url: str, client: HttpClient, depth: int = 2, timeout: int = 5) -> List[str]:
-    """base_url에서 시작해 내부 링크를 재귀적으로 수집"""
-    visited = set()
-    to_visit = deque([(base_url, 0)])
-    found_links = []
-
-    parsed_base = urllib.parse.urlparse(base_url)
-    base_root = f"{parsed_base.scheme}://{parsed_base.netloc}"
-
-    while to_visit:
-        url, d = to_visit.popleft()
-        if d > depth or url in visited:
-            continue
-        visited.add(url)
-
-        try:
-            resp = client.get(url, timeout=timeout)
-            html = resp.text or ""
-        except Exception:
-            continue
-
-        found_links.append(url)
-
-        # 내부 링크 추출
-        for tag, attr in [
-            ("a", "href"), ("form", "action"),
-            ("script", "src"), ("iframe", "src"),
-            ("link", "href")
-        ]:
-            for m in re.finditer(fr"<{tag}[^>]+{attr}=['\"]([^'\"]+)['\"]", html, re.I):
-                link = m.group(1)
-                if link.startswith(("mailto:", "javascript:")):
-                    continue
-                full = urllib.parse.urljoin(url, link)
-                parsed = urllib.parse.urlparse(full)
-                if parsed.netloc == parsed_base.netloc:  # 내부 링크만
-                    if full not in visited:
-                        to_visit.append((full, d + 1))
-    return list(set(found_links))
 
 
 # 파라미터 추출
@@ -171,8 +132,6 @@ if __name__ == "__main__":
         import getpass
         password = getpass.getpass("Password: ") or "password"
 
-        # DVWAAdapter에 같은 client 주입 — 중요!
-        from core.s2nscanner.auth.dvwa_adapter import DVWAAdapter
         adapter = DVWAAdapter(base_url=base, client=client)
 
         print(f"[INFO] 인증 시도: {username}/(hidden) -> base: {base}")
