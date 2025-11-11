@@ -7,7 +7,7 @@ ENV_DIR="$ROOT_DIR/.envs/python"
 VENV_DIR="$ENV_DIR/.venv"
 PYTHON_VERSION_FILE="$ENV_DIR/.python-version"
 PYPROJECT_FILE="$ENV_DIR/pyproject.toml"
-REQUIREMENTS_FILE="$ENV_DIR/requirements-dev.txt"
+REQUIREMENTS_FILE="$ENV_DIR/requirements.txt"
 
 # === Python 버전 탐색 ===
 echo "🔍 Detecting Python version..."
@@ -57,7 +57,7 @@ if [[ -f "$REQUIREMENTS_FILE" ]]; then
   "$VENV_DIR/bin/pip" install --upgrade pip
   "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
 else
-  echo "ℹ️  No requirements-dev.txt found. Skipping."
+  echo "ℹ️  No requirements.txt found. Skipping."
 fi
 
 echo "✅ Virtual environment setup complete!"
