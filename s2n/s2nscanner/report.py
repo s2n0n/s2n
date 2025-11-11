@@ -7,7 +7,7 @@ ScanReport를 다양한 형식(JSON, HTML, CSV, CONSOLE)으로 변환하고 출�
 import csv
 import json
 import traceback
-from dataclasses import asdict, fields
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any
@@ -32,35 +32,7 @@ def _serialize_datetime(obj: Any) -> str:
 
 def _scan_report_to_dict(report: ScanReport) -> Dict[str, Any]:
     """ScanReport를 딕셔너리로 변환 (datetime은 ISO 형식으로)"""
-    result = {}
-    for field in fields(report):
-        value = getattr(report, field.name)
-        if isinstance(value, datetime):
-            result[field.name] = value.isoformat()
-        elif hasattr(value, "__dict__") or hasattr(value, "_asdict"):
-            # dataclass인 경우
-            try:
-                result[field.name] = asdict(value)
-            except TypeError:
-                # nested dataclass 처리
-                if isinstance(value, list):
-                    result[field.name] = [
-                        asdict(item) if hasattr(item, "__dict__") else item
-                        for item in value
-                    ]
-                else:
-                    result[field.name] = str(value)
-        elif isinstance(value, list):
-            result[field.name] = [
-                asdict(item) if hasattr(item, "__dict__") else item for item in value
-            ]
-        elif isinstance(value, dict):
-            result[field.name] = {
-                k: asdict(v) if hasattr(v, "__dict__") else v for k, v in value.items()
-            }
-        else:
-            result[field.name] = value
-    return result
+    return json.loads(json.dumps(asdict(report), default=_serialize_datetime))
 
 
 def format_report_to_json(report: ScanReport, pretty_print: bool = True) -> JSONOutput:
