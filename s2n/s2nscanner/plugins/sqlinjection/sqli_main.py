@@ -130,7 +130,7 @@ class SQLInjectionPlugin:
         requests_sent += form_requests
 
         # 3. 결과 반환 (PluginResult 표준)
-        status = PluginStatus.SUCCESS if not findings else PluginStatus.SUCCESS
+        status = PluginStatus.PARTIAL if not findings else PluginStatus.SUCCESS
 
         return PluginResult(
             plugin_name=self.name,
