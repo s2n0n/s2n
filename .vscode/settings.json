@@ -1,0 +1,5 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/.envs/python/.venv/bin/python",
+    "python.useEnvironmentsExtension": true,
+    "python.analysis.supportAllPythonDocuments": true
+}
