@@ -9,8 +9,6 @@ OS Command Injection Plugin
 from __future__ import annotations
 
 import logging
-import re
-import urllib.parse
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence, Tuple
 from uuid import uuid4
@@ -24,6 +22,11 @@ from s2n.s2nscanner.interfaces import (
     PluginResult,
     PluginStatus,
     Severity,
+)
+from .oscommand_utils import (
+    build_attack_url,
+    extract_params,
+    match_pattern,
 )
 
 logger = logging.getLogger("s2n.plugins.oscommand")
@@ -61,23 +64,6 @@ COMMON_PARAMS: Sequence[str] = [
     "file",
 ]
 
-
-def _extract_params(html: str, url: str) -> List[str]:
-    """
-    HTML/URL에서 파라미터 후보를 추출합니다.
-    HTML에 input name이 없으면 COMMON_PARAMS를 반환합니다.
-    """
-    params = set()
-    parsed = urllib.parse.urlparse(url)
-    q = urllib.parse.parse_qs(parsed.query)
-    params.update(q.keys())
-
-    for match in re.finditer(r'name=["\']?([a-z0-9_\-]+)["\']?', html, re.I):
-        params.add(match.group(1))
-
-    return list(params or COMMON_PARAMS)
-
-
 class OSCommandPlugin:
     name = "oscommand"
     description = "Detects OS Command Injection vulnerabilities"
@@ -90,9 +76,7 @@ class OSCommandPlugin:
         self.patterns: Sequence[str] = self.config.get("patterns", DEFAULT_PATTERNS)
         self.http: Optional[HttpClient] = None
 
-    # ------------------------------------------------------------------
     # New plugin API (PluginContext -> PluginResult)
-    # ------------------------------------------------------------------
     def run(self, plugin_context: PluginContext) -> PluginResult:
         start_time = datetime.utcnow()
         findings: List[Finding] = []
@@ -139,9 +123,7 @@ class OSCommandPlugin:
                 ),
             )
 
-    # ------------------------------------------------------------------
     # Legacy API (initialize/scan/teardown) for backward compatibility
-    # ------------------------------------------------------------------
     def initialize(self, cfg=None, http: Optional[HttpClient] = None):
         """Scanner 엔진의 기존 initialize 시그니처 유지."""
         self.http = http or HttpClient()
@@ -161,9 +143,7 @@ class OSCommandPlugin:
     def teardown(self):
         logger.debug("OSCommand Plugin teardown complete.")
 
-    # ------------------------------------------------------------------
     # Internal helpers
-    # ------------------------------------------------------------------
     def _resolve_client(self, plugin_context: PluginContext) -> HttpClient:
         scan_ctx = getattr(plugin_context, "scan_context", None)
 
@@ -220,7 +200,7 @@ class OSCommandPlugin:
                 logger.debug("Failed to crawl %s: %s", target, exc)
                 continue
 
-            params = _extract_params(html, target)
+            params = extract_params(html, target, COMMON_PARAMS)
             new_findings, new_requests = self._test_os_command_injection(
                 target=target,
                 params=params,
@@ -247,7 +227,7 @@ class OSCommandPlugin:
         for param in candidates:
             vulnerable = False
             for payload in self.payloads:
-                attack_url = self._build_attack_url(target, param, payload)
+                attack_url = build_attack_url(target, param, payload)
                 try:
                     response = client.get(attack_url, timeout=self.timeout)
                     requests_sent += 1
@@ -256,7 +236,7 @@ class OSCommandPlugin:
                     logger.debug("Payload request failed (%s=%s): %s", param, payload, exc)
                     continue
 
-                matched_pattern = self._match_pattern(body)
+                matched_pattern = match_pattern(body, self.patterns)
                 if matched_pattern:
                     findings.append(
                         Finding(
@@ -280,20 +260,6 @@ class OSCommandPlugin:
                 continue
 
         return findings, requests_sent
-
-    def _build_attack_url(self, url: str, param: str, payload: str) -> str:
-        parsed = urllib.parse.urlparse(url)
-        query = dict(urllib.parse.parse_qsl(parsed.query))
-        query[param] = f"test{payload}"
-        new_query = urllib.parse.urlencode(query)
-        return parsed._replace(query=new_query).geturl()
-
-    def _match_pattern(self, body: str) -> Optional[str]:
-        for pattern in self.patterns:
-            if re.search(pattern, body):
-                return pattern
-        return None
-
 
 def main(config: Optional[Dict[str, object]] = None) -> OSCommandPlugin:
     return OSCommandPlugin(config)
