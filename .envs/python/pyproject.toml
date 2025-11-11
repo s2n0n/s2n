@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.envs.default]
 path = ".envs/python/.venv"
-python = "3.11"
+python = "3.11.14"
 
 [project]
 name = "project-root"

@@ -1,13 +1,18 @@
 .cursor
-.vscode
-.vscode.*
-.idea
-.idea/**
+# ---- IntelliJ IDEA / PyCharm ----
+.idea/*
+!.idea/misc.xml
+
+# ---- VS Code ----
+.vscode/*
+!.vscode/settings.json
 
 **/venv
+__pycache__
 
 .env
 .env.local
 .env.dev
 .env.prod
 dist/
+

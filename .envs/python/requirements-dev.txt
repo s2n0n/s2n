@@ -1,5 +1,0 @@
-pytest
-ruff
-black
-hatch
-mypy

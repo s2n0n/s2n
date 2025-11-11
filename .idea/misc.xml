@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Black">
+    <option name="enabledOnSave" value="true" />
+    <option name="sdkName" value="Python 3.11 (s2n)" />
+  </component>
+  <project version="4">
+  <component name="ProjectRootManager" version="2" project-jdk-name="Python (.envs/python/.venv)" project-jdk-type="Python SDK" />
+</project>
+</project>
