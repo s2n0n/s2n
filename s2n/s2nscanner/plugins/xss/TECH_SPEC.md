@@ -24,8 +24,8 @@
 [+] test_xss_unit.py - xss.py 헬퍼 함수 테스트 (_parse_cookies, _finding_to_dict)
     Commit ID: 74c5e0b / Commit Message: test/xss : 1. unit test - xss 헬퍼 함수 테스트
 
-[>] test_xss_unit.py - xss_scanner.py 데이터 클래스 테스트 (PayloadResult, Finding)
-    Commit ID: ________ / Commit Message: ________________________________________
+[+] test_xss_unit.py - xss_scanner.py 데이터 클래스 테스트 (PayloadResult, Finding)
+    Commit ID: b8f3d11 / Commit Message: test/xss : 1. unit test - xss_scanner 데이터 클래스 테스트
 
 [>] test_xss_unit.py - FormParser 클래스 테스트
     Commit ID: ________ / Commit Message: ________________________________________

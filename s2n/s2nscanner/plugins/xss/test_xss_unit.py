@@ -165,3 +165,104 @@ def test_finding_multiple_matches():
     assert len(finding.matches) == 2
     data = finding.as_dict()
     assert len(data["successful_payloads"]) == 2
+
+
+@pytest.mark.unit
+def test_form_parser_basic_form():
+    """기본 form 파싱"""
+    from s2n.s2nscanner.plugins.xss.xss_scanner import FormParser
+
+    html = '<form action="/submit" method="POST"><input name="text" value="test"></form>'
+    parser = FormParser()
+    parser.feed(html)
+
+    assert len(parser.forms) == 1
+    form = parser.forms[0]
+    assert form["action"] == "/submit"
+    assert form["method"] == "POST"
+    assert len(form["inputs"]) == 1
+
+
+@pytest.mark.unit
+def test_form_parser_csrf_field():
+    """CSRF 토큰 필드 포함 form"""
+    from s2n.s2nscanner.plugins.xss.xss_scanner import FormParser
+    from test_fixtures import FORM_WITH_CSRF_HTML
+
+    parser = FormParser()
+    parser.feed(FORM_WITH_CSRF_HTML)
+
+    form = parser.forms[0]
+    assert form["method"] == "POST"
+    assert any(inp["name"] == "csrf_token" for inp in form["inputs"])
+    csrf_input = next(inp for inp in form["inputs"] if inp["name"] == "csrf_token")
+    assert csrf_input["value"] == "abc123"
+    assert csrf_input["type"] == "hidden"
+
+
+@pytest.mark.unit
+def test_form_parser_ignores_nameless_inputs():
+    """name 속성 없는 input은 무시"""
+    from s2n.s2nscanner.plugins.xss.xss_scanner import FormParser
+
+    html = '''
+    <form>
+        <input type="text" value="ignored">
+        <input name="valid" value="included">
+    </form>
+    '''
+    parser = FormParser()
+    parser.feed(html)
+
+    form = parser.forms[0]
+    assert len(form["inputs"]) == 1
+    assert form["inputs"][0]["name"] == "valid"
+
+
+@pytest.mark.unit
+def test_form_parser_multiple_forms():
+    """여러 form 동시 파싱"""
+    from s2n.s2nscanner.plugins.xss.xss_scanner import FormParser
+
+    html = '''
+    <form action="/login"><input name="user"></form>
+    <form action="/search"><input name="q"></form>
+    '''
+    parser = FormParser()
+    parser.feed(html)
+
+    assert len(parser.forms) == 2
+    assert parser.forms[0]["action"] == "/login"
+    assert parser.forms[1]["action"] == "/search"
+
+
+@pytest.mark.unit
+def test_form_parser_default_method():
+    """method 속성 없으면 GET 기본값"""
+    from s2n.s2nscanner.plugins.xss.xss_scanner import FormParser
+
+    html = '<form><input name="q"></form>'
+    parser = FormParser()
+    parser.feed(html)
+
+    assert parser.forms[0]["method"] == "GET"
+
+
+@pytest.mark.unit
+def test_form_parser_textarea_select():
+    """textarea, select 요소도 파싱"""
+    from s2n.s2nscanner.plugins.xss.xss_scanner import FormParser
+
+    html = '''
+    <form>
+        <textarea name="comment"></textarea>
+        <select name="category"></select>
+    </form>
+    '''
+    parser = FormParser()
+    parser.feed(html)
+
+    inputs = parser.forms[0]["inputs"]
+    assert len(inputs) == 2
+    assert any(inp["name"] == "comment" for inp in inputs)
+    assert any(inp["name"] == "category" for inp in inputs)

@@ -396,7 +396,7 @@ def test_prompt_normal_input(monkeypatch):
     assert result == "test_value"
 ```
 
-### [>] test_xss_unit.py - xss_scanner.py 데이터 클래스 테스트 (PayloadResult, Finding)
+### [+] test_xss_unit.py - xss_scanner.py 데이터 클래스 테스트 (PayloadResult, Finding)
 - **목표:** dataclass 기본값, helper 메서드(as_dict, as_s2n_finding) 동작 보장.
 - **키 액션**
   1. `Finding.as_dict()`가 matches를 직렬화하는지 확인.
