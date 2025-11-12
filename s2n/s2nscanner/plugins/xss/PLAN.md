@@ -661,7 +661,7 @@ def test_form_parser_textarea_select():
     assert any(inp["name"] == "category" for inp in inputs)
 ```
 
-### [>] test_xss_unit.py - InputPointDetector 클래스 테스트
+### [+] test_xss_unit.py - InputPointDetector 클래스 테스트
 - **목표:** URL 쿼리 파라미터/폼 파라미터 수집 로직과 예외 처리 확인.
 - **키 액션**
   1. `responses_mock`으로 GET 호출을 모킹하고, 반환된 InputPoint 내용을 단언.

@@ -377,3 +377,130 @@ def test_input_point_detector_action_url_join(responses_mock, mock_http_client):
 
     form_point = points[0]
     assert form_point.url == "https://test.com/submit"
+
+
+@pytest.mark.unit
+def test_detect_context_html():
+    """HTML 컨텍스트 탐지"""
+    from s2n.s2nscanner.plugins.xss.xss_scanner import ReflectedScanner
+
+    body = "<body><script>alert(1)</script></body>"
+    payload = "<script>alert(1)</script>"
+
+    assert ReflectedScanner._detect_context(body, payload) == "html"
+
+
+@pytest.mark.unit
+def test_detect_context_attribute():
+    """속성 컨텍스트 탐지"""
+    from s2n.s2nscanner.plugins.xss.xss_scanner import ReflectedScanner
+
+    payload = "test_payload"
+    body = f'<input value="{payload}">'
+
+    assert ReflectedScanner._detect_context(body, payload) == "attribute"
+
+
+@pytest.mark.unit
+def test_detect_context_mixed():
+    """혼합 컨텍스트 (원본 + 이스케이프)"""
+    from s2n.s2nscanner.plugins.xss.xss_scanner import ReflectedScanner
+
+    payload = "<payload>"
+    body = '<div data="<payload>">&lt;payload&gt;</div>'
+
+    assert ReflectedScanner._detect_context(body, payload) == "mixed"
+
+
+@pytest.mark.unit
+def test_record_creates_finding(payload_path, mock_http_client):
+    """_record가 Finding을 생성하고 matches 추가"""
+    from s2n.s2nscanner.plugins.xss.xss_scanner import (
+        ReflectedScanner, InputPoint, PayloadResult
+    )
+
+    scanner = ReflectedScanner(payload_path, http_client=mock_http_client)
+
+    point = InputPoint(
+        url="https://test.com/app",
+        method="GET",
+        parameters={"q": "test"},
+        source="url"
+    )
+
+    result = PayloadResult(
+        payload="<script>",
+        context="html",
+        category="reflected",
+        category_ko="반사형",
+        description="Test"
+    )
+
+    scanner._record(point, "q", result)
+
+    key = "https://test.com/app|q|GET"
+    assert key in scanner.findings
+    assert len(scanner.findings[key].matches) == 1
+    assert scanner.findings[key].parameter == "q"
+
+
+@pytest.mark.unit
+def test_record_appends_to_existing_finding(payload_path, mock_http_client):
+    """동일 입력 지점에 여러 페이로드 결과 추가"""
+    from s2n.s2nscanner.plugins.xss.xss_scanner import (
+        ReflectedScanner, InputPoint, PayloadResult
+    )
+
+    scanner = ReflectedScanner(payload_path, http_client=mock_http_client)
+
+    point = InputPoint(url="/test", method="POST", parameters={}, source="form")
+
+    scanner._record(point, "param1", PayloadResult("p1", "html", "reflected", "반사형", ""))
+    scanner._record(point, "param1", PayloadResult("p2", "attribute", "reflected", "반사형", ""))
+
+    key = "/test|param1|POST"
+    assert len(scanner.findings[key].matches) == 2
+
+
+@pytest.mark.unit
+def test_record_stored_uses_special_key(payload_path, mock_http_client):
+    """_record_stored는 parameter=[stored] 사용"""
+    from s2n.s2nscanner.plugins.xss.xss_scanner import (
+        ReflectedScanner, InputPoint, PayloadResult
+    )
+
+    scanner = ReflectedScanner(payload_path, http_client=mock_http_client)
+
+    point = InputPoint(url="/feed", method="POST", parameters={}, source="form")
+    result = PayloadResult("stored_p", "stored", "stored", "저장형", "Persisted")
+
+    scanner._record_stored(point, result)
+
+    key = "/feed|[stored]|POST"
+    assert key in scanner.findings
+    assert scanner.findings[key].parameter == "[stored]"
+
+
+@pytest.mark.unit
+def test_as_s2n_findings_conversion(payload_path, mock_http_client):
+    """_as_s2n_findings가 S2NFinding 리스트 반환"""
+    from s2n.s2nscanner.plugins.xss.xss_scanner import (
+        ReflectedScanner, InputPoint, PayloadResult
+    )
+
+    scanner = ReflectedScanner(payload_path, http_client=mock_http_client)
+
+    point = InputPoint(url="/app", method="GET", parameters={"id": "1"}, source="url")
+    scanner._record(point, "id", PayloadResult("<img>", "html", "reflected", "반사형", "Test"))
+
+    findings = scanner._as_s2n_findings()
+
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.plugin == "xss"
+    assert finding.url == "/app"
+    assert finding.parameter == "id"
+    assert finding.payload == "<img>"
+    # Severity는 HIGH, Confidence는 FIRM (fallback 포함)
+    assert hasattr(finding, "severity")
+    assert hasattr(finding, "confidence")

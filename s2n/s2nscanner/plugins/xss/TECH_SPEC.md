@@ -30,8 +30,8 @@
 [+] test_xss_unit.py - FormParser 클래스 테스트
     Commit ID: d1d519e / Commit Message: test/xss : 1. unit test - FormParser 클래스 테스트
 
-[>] test_xss_unit.py - InputPointDetector 클래스 테스트
-    Commit ID: ________ / Commit Message: ________________________________________
+[+] test_xss_unit.py - InputPointDetector 클래스 테스트
+    Commit ID: 983e7a2 / Commit Message: test/xss : 1. unit test - InputPointDetector 클래스 테스트
 
 [>] test_xss_unit.py - ReflectedScanner 개별 메서드 테스트 (_detect_context, _record)
     Commit ID: ________ / Commit Message: ________________________________________
