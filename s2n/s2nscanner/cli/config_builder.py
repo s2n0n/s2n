@@ -18,7 +18,11 @@ def build_scan_config(req: ScanRequest) -> ScanConfig:
     # 인증 설정 구성
     auth_config = None
     if req.auth_type and req.auth_type != AuthType.NONE:
-        auth_config = AuthConfig(auth_type=req.auth_type)
+        auth_config = AuthConfig(
+            auth_type=req.auth_type,
+            username=req.username,
+            password=req.password,
+        )
     
     # 출력 설정 구성
     output_cfg = OutputConfig(

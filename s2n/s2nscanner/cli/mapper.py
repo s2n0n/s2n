@@ -25,6 +25,8 @@ def cliargs_to_scanrequest(args: CLIArguments) -> ScanRequest:
         plugins=args.plugin or [],
         config_path=Path(args.config) if args.config else None,
         auth_type=auth_type,
+        username=args.username,
+        password=args.password,
         output_format=OutputFormat.JSON,
         output_path=Path(args.output) if args.output else None,
         verbose=args.verbose,
