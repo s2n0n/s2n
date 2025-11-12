@@ -1,17 +1,19 @@
-from __future__ import annotations
-import click
-import logging
-from datetime import datetime
-from dataclasses import asdict
-from pathlib import Path    
 
-from s2n.s2nscanner.interfaces import CLIArguments, ScanContext, Finding
+from __future__ import annotations
+from datetime import datetime
+import logging
+import click
+
+from s2n.s2nscanner.interfaces import CLIArguments, ScanContext
 from s2n.s2nscanner.cli.mapper import cliargs_to_scanrequest
 from s2n.s2nscanner.cli.config_builder import build_scan_config
 from s2n.s2nscanner.auth.dvwa_adapter import DVWAAdapter
 from s2n.s2nscanner.scan_engine import Scanner
-from s2n.s2nscanner.report import output_report, OutputFormat
-from s2n.s2nscanner.finding import format_report_to_console
+from s2n.s2nscanner.report import (
+    output_report,
+    OutputFormat,
+    format_report_to_console,
+)
 
 # logger 초기화
 def init_logger(verbose: bool, log_file: str | None) -> logging.Logger:
@@ -75,8 +77,11 @@ def scan(url, plugin, auth, username, password, output, verbose, log_file):
         if request.auth_type.name.lower() == "dvwa":
             logger.info("DVWA authentication requested.")
             adapter = DVWAAdapter(base_url=request.target_url)
+            auth_cfg = config.auth_config
+            username = (auth_cfg.username if auth_cfg else None) or request.username or "admin"
+            password = (auth_cfg.password if auth_cfg else None) or request.password or "password"
             ok = adapter.ensure_authenticated(
-                [(request.username or "admin", request.password or "password")]
+                [(username, password)]
             )
             if ok:
                 http_client = adapter.get_client()
@@ -102,17 +107,18 @@ def scan(url, plugin, auth, username, password, output, verbose, log_file):
     try:
         output_report(report, config.output_config)
         logger.info("Scan report successfully generated.")
-    except Exception as e:
-        
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Failed to output report: %s", exc)
+
     # verbose 모드: 콘솔 상세 출력
-        if verbose and config.output_config.format != OutputFormat.CONSOLE:
-            console_output = format_report_to_console(
-                report, mode=config.output_config.console_mode
-            )
-            click.echo("\n===== Scan Summary =====")
-            for line in console_output.summary_lines:
-                click.echo(line)
-            click.echo("========================\n")
+    if verbose and config.output_config.format != OutputFormat.CONSOLE:
+        console_output = format_report_to_console(
+            report, mode=config.output_config.console_mode
+        )
+        click.echo("\n===== Scan Summary =====")
+        for line in console_output.summary_lines:
+            click.echo(line)
+        click.echo("========================\n")
 
 
 
