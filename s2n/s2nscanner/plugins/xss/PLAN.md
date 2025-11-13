@@ -29,6 +29,9 @@
 
 [+] test_xss_unit.py - ReflectedScanner 개별 메서드 테스트 (_detect_context, _record)
     Commit ID: 9b25852 / Commit Message: test/xss : 1. unit test - ReflectedScanner 개별 메서드 테스트
+
+[+] conftest.py 및 test_xss_unit.py import 경로 수정 (상대 import)
+    Commit ID: 74f8246 / Commit Message: test/xss : 1. unit test - 31 all passed
 ```
 
 ### Phase 2: 통합 테스트 (Integration Tests)
