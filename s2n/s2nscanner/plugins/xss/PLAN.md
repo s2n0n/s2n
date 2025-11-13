@@ -36,14 +36,14 @@
 
 ### Phase 2: 통합 테스트 (Integration Tests)
 ```
-[>] test_xss_integration.py - ReflectedScanner 반사형 XSS 전체 플로우 (GET)
-    Commit ID: ________ / Commit Message: ________________________________________
+[+] test_xss_integration.py - ReflectedScanner 반사형 XSS 전체 플로우 (GET)
+    Commit ID: a463022 / Commit Message: 2. integration test - reflected xss 플로우 (GET)
 
-[>] test_xss_integration.py - ReflectedScanner 반사형 XSS 전체 플로우 (POST)
-    Commit ID: ________ / Commit Message: ________________________________________
+[+] test_xss_integration.py - ReflectedScanner 반사형 XSS 전체 플로우 (POST)
+    Commit ID: a463022 / Commit Message: 2. integration test - reflected xss 플로우 (GET)
 
-[>] test_xss_integration.py - ReflectedScanner CSRF 토큰 처리 테스트
-    Commit ID: ________ / Commit Message: ________________________________________
+[+] test_xss_integration.py - ReflectedScanner CSRF 토큰 처리 테스트
+    Commit ID: a463022 / Commit Message: 2. integration test - reflected xss 플로우 (GET)
 
 [>] test_xss_integration.py - StoredScanner 저장형 XSS 전체 플로우
     Commit ID: ________ / Commit Message: ________________________________________
