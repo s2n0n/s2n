@@ -141,6 +141,6 @@ def plugin_context_factory(mock_http_client):
 @pytest.fixture
 def responses_mock():
     """responses 라이브러리를 사용한 HTTP 모킹"""
-    import responses as responses_lib
+    responses_lib = pytest.importorskip("responses")
     with responses_lib.RequestsMock() as rsps:
         yield rsps
