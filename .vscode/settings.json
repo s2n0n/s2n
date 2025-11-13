@@ -7,5 +7,6 @@
     "python.testing.unittestEnabled": true,
     "python-env.workspaceSearchPaths": [
         ".envs/python/.venv"
-    ]
+    ],
+    "liveServer.settings.port": 5501
 }
