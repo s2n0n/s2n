@@ -14,7 +14,7 @@ def find_login_form(soup: BeautifulSoup) -> Tag | None:
     for form in soup.find_all("form"):
         if form.find("input", {"type": "password"}):
             # 'login', 'signin' 등의 키워드가 action에 있는지 확인하여 더 정확하게 판단
-            action = form.get("action", "").lower()
+            action = str(form.get("action", "")).lower()
             if "login" in action or "signin" in action:
                 return form
     return None
@@ -38,7 +38,7 @@ def guess_uploaded_urls(response, base_url: str) -> list[str]:
     soup = BeautifulSoup(response.text, "html.parser")
     for a_tag in soup.find_all("a", href=True):
         href = a_tag["href"]
-        full_url = urljoin(base_url, href)
+        full_url = urljoin(base_url, str(href))
         urls.add(full_url)
 
     # 2. 일반적인 업로드 경로 추측
