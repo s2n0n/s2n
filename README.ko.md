@@ -30,9 +30,11 @@ s2n scan \
   --password pass \
   --output results.json \
   --verbose
+```
 
 Python 사용 예시
 
+```python
 from s2n import Scanner, ScanConfig, PluginConfig, AuthConfig
 from s2n.interfaces import Severity, AuthType
 
@@ -63,44 +65,47 @@ for result in report.plugin_results:
     for finding in result.findings:
         if finding.severity in [Severity.CRITICAL, SeverityHIGH]:
             print(f"[{finding.severity}] {finding.title}")
+```
 
+---
 
-⸻
-
-주요 타입 참고
+## 주요 타입 참고
 
 문서
-	•	데이터 타입 참고 문서: interfaces.en.md
-	•	소스 코드: interfaces.py
+
+- 데이터 타입 참고 문서: interfaces.en.md
+- 소스 코드: interfaces.py
 
 핵심 타입 및 데이터 모델
-	•	s2n.s2nscanner.interfaces.ScanConfig
-	•	s2n.s2nscanner.interfaces.PluginConfig
-	•	s2n.s2nscanner.interfaces.ScannerConfig
+
+- s2n.s2nscanner.interfaces.ScanConfig
+- s2n.s2nscanner.interfaces.PluginConfig
+- s2n.s2nscanner.interfaces.ScannerConfig
 
 결과 & 리포팅
-	•	s2n.s2nscanner.interfaces.ScanReport
-	•	s2n.s2nscanner.interfaces.Finding
+
+- s2n.s2nscanner.interfaces.ScanReport
+- s2n.s2nscanner.interfaces.Finding
 
 열거형(Enums)
-	•	s2n.s2nscanner.interfaces.Severity
-	•	s2n.s2nscanner.interfaces.PluginStatus
+
+- s2n.s2nscanner.interfaces.Severity
+- s2n.s2nscanner.interfaces.PluginStatus
 
 기능
-	•	플러그인 아키텍처 기반의 모듈형 취약점 검사
-	•	요청/결과/출력에 대한 구조화된 데이터 모델
-	•	다양한 출력 형식 지원 (JSON, HTML, console)
-	•	스캐너 동작 및 플러그인 설정을 유연하게 구성 가능
 
-⸻
+- 플러그인 아키텍처 기반의 모듈형 취약점 검사
+- 요청/결과/출력에 대한 구조화된 데이터 모델
+- 다양한 출력 형식 지원 (JSON, HTML, console)
+- 스캐너 동작 및 플러그인 설정을 유연하게 구성 가능
+
+---
 
 라이선스
 
-⸻
+---
 
 기여 가이드
 
 프로젝트 코딩 스타일을 따르고, 새로운 기능을 추가할 경우 테스트 코드를 함께 작성해주세요.
-인터페이스가 변경될 때는 interfaces.en.md 문서를 업데이트해야 합니다.
-
-```
+인터페이스가 변경될 때는 `interfaces.en.md` 문서를 업데이트해야 합니다.
