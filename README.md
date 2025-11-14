@@ -17,6 +17,11 @@
 
 ---
 
+- [PyPi s2n](https://pypi.org/project/s2n/)
+- [Korean Documentation](./README.ko.md)
+
+---
+
 ## Quick install
 
 ### CLI usage
@@ -109,3 +114,5 @@ Configurable scanner behavior and per-plugin settings.
 
 Follow the project coding style and add tests for new features.  
 Update type docs in interfaces.en.md when interfaces change.
+
+---

@@ -17,6 +17,10 @@
 > Core data types and interfaces are defined in `s2n.s2nscanner.interfaces`.
 > More detailed type Documentation is available in [`interfaces.en.md`](/docs/interfaces.en.md).
 
+### Github
+
+[S2N Github Repository](https://github.com/504s2n/s2n)
+
 ---
 
 ## Quick install
