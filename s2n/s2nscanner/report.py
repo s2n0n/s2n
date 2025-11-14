@@ -25,7 +25,9 @@ from s2n.s2nscanner.interfaces import (
 
 def _serialize_datetime(obj: Any) -> str:
     """datetime 객체를 ISO8601 형식 문자열로 변환 : datetime 전용 직렬화 함수"""
-    return str(obj.isoformat() | datetime.now().isoformat())
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    return str(obj)
 
 
 def _scan_report_to_dict(report: ScanReport) -> Dict[str, Any]:
@@ -446,29 +448,29 @@ def output_report(report: ScanReport, config: OutputConfig) -> None:
         Path(config.path).write_text(csv_str, encoding="utf-8")
 
     elif config.format == OutputFormat.MULTI:
-        # 여러 형식으로 동시 출력
-        base_path = config.path or Path("report")
-    try:
-        # JSON
-        json_path = base_path.with_suffix(".json")
-        save_report(report, json_path, OutputFormat.JSON, config.pretty_print)
+        base_path = Path(config.path) if config.path else Path("report")
 
-        # HTML
-        html_path = base_path.with_suffix(".html")
-        save_report(report, html_path, OutputFormat.HTML)
+        try:
+            # JSON 저장
+            json_path = base_path.with_suffix(".json")
+            save_report(report, json_path, OutputFormat.JSON, config.pretty_print)
 
-        # CSV
-        csv_path = base_path.with_suffix(".csv")
-        save_report(report, csv_path, OutputFormat.CSV)
+            # HTML 저장
+            html_path = base_path.with_suffix(".html")
+            save_report(report, html_path, OutputFormat.HTML)
 
-        # CONSOLE
-        console_output = format_report_to_console(report, mode=config.console_mode)
-        for line in console_output.summary_lines:
-            print(line)
-        for line in console_output.detail_lines:
-            print(line)
-    except Exception as ex:
-        traceback.print_exc()
-        print(f"[ERROR]: REPORT FAILED: {ex} (MULTI Option error)")
-    else:
-        raise ValueError(f"Unsupported output format: {config.format}")
+            # CSV 저장
+            csv_path = base_path.with_suffix(".csv")
+            save_report(report, csv_path, OutputFormat.CSV)
+
+            # 콘솔 출력
+            console_output = format_report_to_console(report, mode=config.console_mode)
+            for line in console_output.summary_lines:
+                print(line)
+            for line in console_output.detail_lines:
+                print(line)
+
+        except Exception as ex:
+            traceback.print_exc()
+            print(f"[ERROR]: REPORT FAILED: {ex} (MULTI Option error)")
+    return
