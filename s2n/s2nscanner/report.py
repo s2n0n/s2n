@@ -25,7 +25,9 @@ from s2n.s2nscanner.interfaces import (
 
 def _serialize_datetime(obj: Any) -> str:
     """datetime 객체를 ISO8601 형식 문자열로 변환 : datetime 전용 직렬화 함수"""
-    return str(obj.isoformat() | datetime.now().isoformat())
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    return str(obj)
 
 
 def _scan_report_to_dict(report: ScanReport) -> Dict[str, Any]:
