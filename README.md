@@ -1,6 +1,4 @@
-# S2N
-
-## Plugin-based Web Vulnerability Scanner
+# S2N — Plugin-based Web Vulnerability Scanner
 
 <pre>
  (`-').->        <-. (`-')_
@@ -17,9 +15,10 @@
 > Core data types and interfaces are defined in `s2n.s2nscanner.interfaces`.
 > More detailed type Documentation is available in [`interfaces.en.md`](/docs/interfaces.en.md).
 
-### Github
+---
 
-[S2N Github Repository](https://github.com/504s2n/s2n)
+- [PyPi s2n](https://pypi.org/project/s2n/)
+- [Korean Documentation](./README.ko.md)
 
 ---
 
@@ -115,3 +114,5 @@ Configurable scanner behavior and per-plugin settings.
 
 Follow the project coding style and add tests for new features.  
 Update type docs in interfaces.en.md when interfaces change.
+
+---
