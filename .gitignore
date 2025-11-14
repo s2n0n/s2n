@@ -1,11 +1,26 @@
 .cursor
-.vscode
-.vscode.*
+# ---- IntelliJ IDEA / PyCharm ----
+.idea/*
+!.idea/misc.xml
 
-**/venv
+# ---- VS Code ----
+.vscode/*
+!.vscode/settings.json
 
+.venv
+__pycache__
+__pycache__/
 .env
 .env.local
 .env.dev
 .env.prod
 dist/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.pyc
+
+.clude/settings.local.json
