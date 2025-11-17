@@ -1,15 +1,22 @@
 # S2N — Plugin-based Web Vulnerability Scanner
 
-<pre>
- (`-').->        <-. (`-')_
- ( OO)_             \( OO) )
-(_)--\_)  .----. ,--./ ,--/
-/    _ / \_,-.  ||   \ |  |
-\_..`--.    .' .'|  . '|  |)
-.-._)   \ .'  /_ |  |\    |
-\       /|      ||  | \   |
- `-----' `------'`--'  `--'
-</pre>
+```mermaid
+stateDiagram-v2
+
+state "<pre><code>
+  .-')                 .-') _  
+ ( OO ).              ( OO ) ) 
+(_)---\_) .-----. ,--./ ,--,'  
+/    _ | / ,-.   \|   \ |  |\  
+\  :` `. '-'  |  ||    \|  | ) 
+ '..`''.)   .'  / |  .     |/  
+.-._)   \ .'  /__ |  |\    |   
+\       /|       ||  | \   |   
+ `-----' `-------'`--'  `--'   
+</pre></code>" as logo
+
+style logo color: #FFF, fill:#0022FF
+```
 
 > A lightweight, plugin-driven web vulnerability scanner library.
 > Core data types and interfaces are defined in `s2n.s2nscanner.interfaces`.
