@@ -6,8 +6,10 @@ from s2n.s2nscanner.http.client import HttpClient
 from s2n.s2nscanner.interfaces import PluginContext, Finding, HTTPRequest, Severity, Confidence
 from s2n.s2nscanner.plugins.csrf.csrf_constants import CSRF_TOKEN_KEYWORDS, USER_AGENT
 from s2n.s2nscanner.plugins.csrf.csrf_utils import FormParser
+from s2n.s2nscanner.logger import get_logger
 
-logger = logging.getLogger("s2n.plugins.csrf")
+
+logger = get_logger("plugins.csrf")
 
 
 # TODO:

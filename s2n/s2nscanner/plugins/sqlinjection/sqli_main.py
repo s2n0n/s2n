@@ -27,6 +27,7 @@ from s2n.s2nscanner.interfaces import (
     ScannerConfig,
     Severity,
 )
+from s2n.s2nscanner.logger import get_logger
 
 # HTTP 클라이언트 (별도 모듈)
 from s2n.s2nscanner.http.client import HttpClient
@@ -38,7 +39,7 @@ from .sqli_dvwa_helper import (
     extract_url_info
 )
 
-logger = logging.getLogger('s2n.plugins.sqlinjection')
+logger = get_logger('plugins.sqlinjection')
 
 class SQLInjectionPlugin:
     name = "sqlinjection"

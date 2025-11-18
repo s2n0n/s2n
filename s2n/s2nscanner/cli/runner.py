@@ -13,6 +13,7 @@ from s2n.s2nscanner.report import (
     OutputFormat,
     format_report_to_console,
 )
+from s2n.s2nscanner.logger import init_logger, get_logger
 
 from rich.console import Console
 from rich.table import Table
@@ -20,29 +21,7 @@ from rich import box
 
 console = Console()
 
-# ============================================================
-# Logger 초기화
-# ============================================================
-def init_logger(verbose: bool, log_file: str | None) -> logging.Logger:
-    logger = logging.getLogger("s2n")
-    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
-    fmt = logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s")
-
-    sh = logging.StreamHandler()
-    sh.setFormatter(fmt)
-    logger.addHandler(sh)
-
-    if log_file:
-        fh = logging.FileHandler(log_file)
-        fh.setFormatter(fmt)
-        logger.addHandler(fh)
-
-    return logger
-
-
-# ============================================================
 # CLI Root
-# ============================================================
 @click.group()
 def cli():
     ascii_logo = r"""
@@ -61,9 +40,7 @@ def cli():
     click.echo("🔍 Welcome to S2N Scanner! Use --help to explore commands.\n")
 
 
-# ============================================================
 # scan 명령어
-# ============================================================
 @cli.command("scan")
 @click.option("-u", "--url", required=True, help="스캔 대상 URL")
 @click.option("-p", "--plugin", multiple=True, help="사용할 플러그인 이름 (복수 선택 가능)")
@@ -77,9 +54,7 @@ def scan(url, plugin, auth, username, password, output, verbose, log_file):
     logger = init_logger(verbose, log_file)
     logger.info("Starting scan for %s", url)
 
-    # --------------------------------------------------------
     # CLIArguments 구성
-    # --------------------------------------------------------
     args = CLIArguments(
         url=url,
         plugin=list(plugin),
@@ -94,9 +69,7 @@ def scan(url, plugin, auth, username, password, output, verbose, log_file):
     request = cliargs_to_scanrequest(args)
     config = build_scan_config(request, username=username, password=password)
 
-    # --------------------------------------------------------
     # 인증 처리 (DVWA)
-    # --------------------------------------------------------
     http_client = None
     auth_adapter = None
     auth_credentials = None
@@ -116,9 +89,7 @@ def scan(url, plugin, auth, username, password, output, verbose, log_file):
         else:
             logger.warning("DVWA 로그인 실패 - 인증 없이 진행")
 
-    # --------------------------------------------------------
     # ScanContext 생성
-    # --------------------------------------------------------
     scan_ctx = ScanContext(
         scan_id=f"scan-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
         start_time=datetime.utcnow(),
@@ -135,27 +106,21 @@ def scan(url, plugin, auth, username, password, output, verbose, log_file):
         logger=logger,
     )
 
-    # --------------------------------------------------------
     # Scan 실행 + Duration 계산
-    # --------------------------------------------------------
     start = datetime.utcnow()
     report = scanner.scan()
     end = datetime.utcnow()
 
     duration = (end - start).total_seconds()
 
-    # --------------------------------------------------------
     # Report 출력
-    # --------------------------------------------------------
     try:
         output_report(report, config.output_config)
         logger.info("Scan report successfully generated.")
     except Exception as exc:
         logger.exception("Failed to output report: %s", exc)
 
-    # --------------------------------------------------------
     # Rich Summary (Verbose)
-    # --------------------------------------------------------
     if verbose:
         table = Table(
             title="🚀 S2N Scan Summary",
@@ -185,3 +150,4 @@ def scan(url, plugin, auth, username, password, output, verbose, log_file):
 
 if __name__ == "__main__":
     cli()
+    

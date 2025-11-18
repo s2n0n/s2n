@@ -18,6 +18,8 @@ from s2n.s2nscanner.interfaces import (
     PluginStatus,
     Severity,
 )
+from s2n.s2nscanner.logger import get_logger
+
 	
 # 헬퍼 함수 임포트: 패키지 실행/모듈 실행/직접 실행 모두 지원
 try:
@@ -25,7 +27,7 @@ try:
 except ImportError:
     from file_upload_utils import collect_form_data, find_login_form, find_upload_form, guess_uploaded_urls
 
-logger = logging.getLogger("s2n.plugins.file_upload")
+logger = get_logger("plugins.file_upload")
 
 
 class FileUploadPlugin:
