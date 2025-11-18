@@ -15,8 +15,10 @@ from s2n.s2nscanner.interfaces import (
 )
 
 from .xss_scanner import ReflectedScanner
+from s2n.s2nscanner.logger import get_logger
 
-logger = logging.getLogger("s2n.plugins.xss")
+
+logger = get_logger("plugins.xss")
 
 
 # 페이로드 파일 로드

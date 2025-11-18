@@ -7,6 +7,7 @@ import pytest
 from click.testing import CliRunner
 
 from s2n.s2nscanner.cli import runner as runner_mod
+from s2n.s2nscanner.logger import get_logger
 
 
 # Fake ScanReport (runner가 기대하는 구조와 동일하게)
@@ -55,7 +56,7 @@ def cli_runner():
 
 @pytest.fixture()
 def fake_common(monkeypatch):
-    root = logging.getLogger("s2n")
+    root = get_logger()
     root.handlers.clear()
 
     # fake cliargs_to_scanrequest
@@ -176,3 +177,4 @@ def test_scan_output_report_error_does_not_crash(cli_runner, monkeypatch, fake_c
     )
 
     assert result.exit_code == 0, f"CLI should not crash: {result.output}"
+    

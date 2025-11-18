@@ -41,6 +41,7 @@ from s2n.s2nscanner.interfaces import (
     ScanReport,
     Severity,
 )
+from s2n.s2nscanner.logger import get_logger
 
 PLUGIN_PACKAGE = "s2n.s2nscanner.plugins"
 DEFAULT_SCANNER_VERSION = "0.1.0"
@@ -73,7 +74,7 @@ class Scanner:
             raise ValueError("Scanner requires a ScanConfig instance.")
 
         self.config = config
-        self.logger = logger or logging.getLogger("s2n.scanner")
+        self.logger = logger or get_logger("scanner")
         self.auth_adapter = auth_adapter
         self.auth_credentials = auth_credentials or []
         self.defer_authentication = defer_authentication
@@ -94,6 +95,8 @@ class Scanner:
         self.prioritized_plugins = ["brute_force"]
         self._scanner_version = self._resolve_version()
         self.scan_context = self._prepare_scan_context(scan_context)
+
+        self.scan_context.logger = self.logger
 
         self.logger.debug(
             "Scanner initialized. target=%s, plugins(preloaded)=%d",
@@ -384,7 +387,7 @@ class Scanner:
         plugin_config: PluginConfig,
         ) -> PluginResult:
         start_time = datetime.utcnow()
-        plugin_logger = logging.getLogger(f"s2n.plugins.{plugin_name}")
+        plugin_logger = get_logger(f"plugins.{plugin_name}")
 
         self.logger.debug(f"🚀 Running plugin '{plugin_name}' with config: {plugin_config}")
 

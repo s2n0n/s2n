@@ -28,8 +28,10 @@ from .oscommand_utils import (
     extract_params,
     match_pattern,
 )
+from s2n.s2nscanner.logger import get_logger
 
-logger = logging.getLogger("s2n.plugins.oscommand")
+
+logger = get_logger("plugins.oscommand")
 
 # 기본 페이로드 / 패턴 / 파라미터 후보
 DEFAULT_PAYLOADS: Sequence[str] = [

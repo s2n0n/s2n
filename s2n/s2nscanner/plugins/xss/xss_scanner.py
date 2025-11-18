@@ -25,8 +25,10 @@ from s2n.s2nscanner.interfaces import (
     PluginStatus,
     Severity,
 )
+from s2n.s2nscanner.logger import get_logger
 
-logger = logging.getLogger("s2n.plugins.xss")
+
+logger = get_logger("plugins.xss")
 
 # 토큰 탐지를 위한 키워드 목록
 TOKEN_KEYWORDS = ("token", "csrf", "nonce")
