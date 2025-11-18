@@ -2,8 +2,8 @@
 set -e  # 오류 발생 시 중단
 
 # === 기본 경로 설정 ===
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_DIR="$ROOT_DIR/.envs/python"
+ROOT_DIR="/$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_DIR="$ROOT_DIR/../../.envs/python"
 VENV_DIR="$ENV_DIR/.venv"
 PYTHON_VERSION_FILE="$ENV_DIR/.python-version"
 PYPROJECT_FILE="$ENV_DIR/pyproject.toml"
