@@ -9,7 +9,6 @@ from click.testing import CliRunner
 from s2n.s2nscanner.cli import runner as runner_mod
 from s2n.s2nscanner.logger import get_logger
 
-
 # Fake ScanReport (runner가 기대하는 구조와 동일하게)
 class FakeScanReport:
     def __init__(self, scan_id, started_at):
