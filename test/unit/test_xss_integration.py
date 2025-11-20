@@ -14,13 +14,14 @@
 4. responses 라이브러리로 HTTP 완전 모킹
 """
 from datetime import datetime, timezone
-import stat
 import time
 import pytest
 
 from s2n.s2nscanner.plugins.xss.xss import XSSScanner
-from s2n.s2nscanner.interfaces import PluginStatus, PluginContext, ScanContext, ScanConfig, PluginConfig, PluginResult
+from s2n.s2nscanner.interfaces import PluginStatus, PluginContext, ScanContext, ScanConfig, PluginConfig, PluginResult, PluginError
 from s2n.s2nscanner.plugins.xss.xss_scanner import ReflectedScanner
+
+
 
 
 responses = pytest.importorskip("responses")

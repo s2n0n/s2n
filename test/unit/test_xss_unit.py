@@ -1,7 +1,9 @@
 # test_xss_unit.py
-import pytest
 from s2n.s2nscanner.plugins.xss.xss import _load_payload_path
+from test.unit.test_xss_fixtures import FORM_WITH_CSRF_HTML
 
+
+import pytest
 
 @pytest.mark.unit
 def test_load_payload_path_success():
@@ -16,7 +18,6 @@ def test_load_payload_path_success():
 @pytest.mark.unit
 def test_load_payload_path_not_found(tmp_path, monkeypatch):
     """payload 파일이 없는 경우 FileNotFoundError"""
-    from pathlib import Path
 
     # xss.py 모듈의 __file__ 속성을 임시 디렉토리로 변경
     import s2n.s2nscanner.plugins.xss.xss as xss_module
@@ -109,7 +110,6 @@ def test_form_parser_basic_form():
 def test_form_parser_csrf_field():
     """CSRF 토큰 필드 포함 form"""
     from s2n.s2nscanner.plugins.xss.xss_scanner import FormParser
-    from test_xss_fixtures import FORM_WITH_CSRF_HTML
 
     parser = FormParser()
     parser.feed(FORM_WITH_CSRF_HTML)
@@ -212,7 +212,6 @@ def test_input_point_detector_from_query(responses_mock, mock_http_client):
 def test_input_point_detector_from_form(responses_mock, mock_http_client):
     """HTML form 입력 지점 탐지"""
     from s2n.s2nscanner.plugins.xss.xss_scanner import InputPointDetector
-    from test_xss_fixtures import FORM_WITH_CSRF_HTML
 
     responses_mock.get("https://app.test/form", body=FORM_WITH_CSRF_HTML, status=200)
 

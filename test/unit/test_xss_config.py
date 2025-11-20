@@ -4,6 +4,7 @@ import json
 import pytest
 from pathlib import Path
 import shutil
+from test.unit.test_xss_fixtures import SAMPLE_PAYLOADS_JSON
 
 
 # ========================================
@@ -121,19 +122,11 @@ except ImportError:
             return self.s.post(*args, **kwargs)
 
 
-# test_xss_fixtures 절대경로 import
-from test_xss_fixtures import SAMPLE_PAYLOADS_JSON
-
 
 # ========================================
 # 5. Fixtures
 # ========================================
 @pytest.fixture(scope="session")
-def sample_payloads():
-    """테스트용 페이로드 리스트"""
-    from test_xss_fixtures import SAMPLE_PAYLOADS
-    return SAMPLE_PAYLOADS
-
 
 @pytest.fixture(scope="session")
 def payload_path(tmp_path_factory):
