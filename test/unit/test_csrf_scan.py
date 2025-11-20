@@ -1,12 +1,7 @@
 from types import SimpleNamespace
 
 from s2n.s2nscanner.plugins.csrf import csrf_scan as csrf_scan_module
-from s2n.s2nscanner.plugins.csrf.test.test_data import (
-    HTML_WITH_CSRF_TOKEN,
-    HTML_WITHOUT_CSRF,
-    HTML_NO_FORMS,
-)
-
+from test_csrf_data import HTML_WITH_CSRF_TOKEN, HTML_WITHOUT_CSRF, HTML_NO_FORMS
 
 class MockRequest:
     def __init__(self):

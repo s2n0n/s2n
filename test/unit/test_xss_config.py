@@ -72,7 +72,6 @@ def find_payload_file(filename="xss_payloads.json"):
 try:
     from s2n.s2nscanner.interfaces import (
         PluginContext, ScanContext, PluginConfig,
-        PluginResult, PluginStatus, Severity, Confidence,
         ScanConfig
     )
     from s2n.s2nscanner.http.client import HttpClient
@@ -164,7 +163,6 @@ def mock_http_client():
     """HttpClient wrapper 모킹"""
     client = HttpClient()
     return client
-
 
 @pytest.fixture
 def plugin_context_factory(mock_http_client):

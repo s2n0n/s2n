@@ -1,19 +1,9 @@
+from test.mock_data import MockPluginContext
 from types import SimpleNamespace
 from s2n.s2nscanner.plugins.csrf import csrf_main
 from s2n.s2nscanner.plugins.csrf import csrf_scan as csrf_scan_module
 from s2n.s2nscanner.interfaces import Finding, PluginStatus, Severity, PluginResult
 
-
-def make_mock_plugin_context(http_client, target_urls):
-    scan_context = SimpleNamespace(http_client=http_client)
-    plugin_context = SimpleNamespace(
-        plugin_name="csrf",
-        scan_context=scan_context,
-        plugin_config=None,
-        target_urls=target_urls,
-        logger=None,
-    )
-    return plugin_context
 
 
 def test_main_run_uses_csrf_scan(monkeypatch):
@@ -32,7 +22,7 @@ def test_main_run_uses_csrf_scan(monkeypatch):
     # mock http client exposing .s (session)
     session = SimpleNamespace(headers={})
     http_client = SimpleNamespace(s=session)
-    plugin_context = make_mock_plugin_context(http_client, ["http://example.local"]) 
+    plugin_context = MockPluginContext(http_client=http_client, target_urls=["http://example.local"]) 
 
     scanner = csrf_main.main()
     result = scanner.run(plugin_context)  # type: ignore[arg-type]
