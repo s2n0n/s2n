@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from uuid import uuid4
 
 from s2n.s2nscanner.crawler import crawl_recursive
-from s2n.s2nscanner.http.client import HttpClient
+from s2n.s2nscanner.clients.http_client import HttpClient
 from s2n.s2nscanner.interfaces import (
     Finding,
     PluginContext,
