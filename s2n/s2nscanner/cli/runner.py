@@ -1,6 +1,5 @@
 from __future__ import annotations
 from datetime import datetime
-import logging
 import click
 
 from s2n.s2nscanner.interfaces import CLIArguments, ScanContext
@@ -8,18 +7,15 @@ from s2n.s2nscanner.cli.mapper import cliargs_to_scanrequest
 from s2n.s2nscanner.cli.config_builder import build_scan_config
 from s2n.s2nscanner.auth.dvwa_adapter import DVWAAdapter
 from s2n.s2nscanner.scan_engine import Scanner
-from s2n.s2nscanner.report import (
-    output_report,
-    OutputFormat,
-    format_report_to_console,
-)
-from s2n.s2nscanner.logger import init_logger, get_logger
+from s2n.s2nscanner.report import output_report, OutputFormat
+from s2n.s2nscanner.logger import init_logger
 
 from rich.console import Console
 from rich.table import Table
 from rich import box
 
 console = Console()
+
 
 # CLI Root
 @click.group()
@@ -43,7 +39,9 @@ def cli():
 # scan 명령어
 @cli.command("scan")
 @click.option("-u", "--url", required=True, help="스캔 대상 URL")
-@click.option("-p", "--plugin", multiple=True, help="사용할 플러그인 이름 (복수 선택 가능)")
+@click.option(
+    "-p", "--plugin", multiple=True, help="사용할 플러그인 이름 (복수 선택 가능)"
+)
 @click.option("-a", "--auth", help="인증 타입 (NONE, BASIC, BEARER, DVWA 등)")
 @click.option("--username", help="인증용 사용자명")
 @click.option("--password", help="인증용 비밀번호")
@@ -150,4 +148,3 @@ def scan(url, plugin, auth, username, password, output, verbose, log_file):
 
 if __name__ == "__main__":
     cli()
-    
