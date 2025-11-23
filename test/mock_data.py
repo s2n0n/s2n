@@ -1,15 +1,11 @@
-import time
-
 from typing import Optional
 from types import SimpleNamespace
-from unittest import mock
 import pytest
 import pkgutil
 import importlib
 from datetime import datetime
 
-
-from mock_helper import to_mock_interface
+from test.mock_helper import to_mock_interface
 
 from s2n.s2nscanner import plugins as plugins_pkg
 from s2n.s2nscanner.interfaces import (
@@ -17,29 +13,59 @@ from s2n.s2nscanner.interfaces import (
     NetworkConfig, OutputConfig, LoggingConfig, ScanRequest, CLIArguments,
     PluginContext, HTTPRequest, HTTPResponse, Finding, PluginError, PluginResult,
     ScanSummary, ScanMetadata, ScanReport, ErrorReport, ProgressInfo,
-    ConsoleOutput, JSONOutput, Severity, OutputFormat, ConsoleMode, LogLevel,
-    Confidence, PluginStatus
+    ConsoleOutput, JSONOutput, Severity,  ConsoleMode, 
+    PluginStatus
 )
 
 
 """============ HTTP Mock Classes ============"""
 # Lightweight HTTP/session/request mocks used across tests
 class MockRequest:
+    def get(self, **kwargs):
+        return MockResponse(**kwargs)
+
     def __init__(self):
         self.headers = {"Host": "example.com"}
         self._cookies = {}
+        self.request = self.get
 
-class MockHTTPClient:
-    def __init__(self, text=""):
-        self.s = MockSession(text)
-        self.headers = {}
-        
+
 class MockResponse:
-    def __init__(self, text="", headers=None):
+    def __init__(self, text="", headers=None, **kwargs):
         self.text = text
         self.headers = headers or {}
         self.request = MockRequest()
+        self.kwargs = kwargs
 
+    def get(self, **kwargs):
+        return self
+
+class MockHTTPClient:
+
+    def __init__(self, text="", **kwargs):
+        self.s = MockSession(text)
+        self.headers = {}
+        self.calls = []
+    
+    def request(self, **kwargs):
+        self.calls.append(kwargs)
+        return MockRequest(**kwargs)
+    
+    def response(self, **kwargs):
+        self.calls.append(kwargs)
+        return MockResponse(**kwargs)
+    
+    def get(self, url, **kwargs):
+        self.calls.append(url)
+        if "page.php" in url and "?" not in url:
+            return MockResponse('<form><input name="cmd"></form>')
+        if "%3Bid" in url:
+            return MockResponse("uid=0(root)")
+        return MockResponse("safe response")
+
+    
+
+    
 
 class MockSession:
     def __init__(self, text):
@@ -51,22 +77,6 @@ class MockSession:
         _ = _url
         _ = timeout
         return MockResponse(self._text, headers={})
-
-
-class MockHttpClient:
-    """요청 URL을 기록하고 준비된 응답을 돌려주는 테스트 전용 클라이언트입니다."""
-    def __init__(self, headers: None | dict = None, text: str | None = None):
-        self.calls = []
-        self.headers = headers or {}
-        self._text = text or "<html></html>"
-
-    def get(self, url, **kwargs):
-        self.calls.append(url)
-        if "page.php" in url and "?" not in url:
-            return MockResponse('<form><input name="cmd"></form>')
-        if "%3Bid" in url:
-            return MockResponse("uid=0(root)")
-        return MockResponse("safe response")
 
 def gen_http_client(text="<html></html>"):
     return SimpleNamespace(s=MockSession(text))
@@ -154,21 +164,45 @@ class MockCLIArguments:
 
 class MockPluginContext:
     def __init__(self, obj: Optional[PluginContext] = None):
-        mock_scan_config = ScanConfig(target_url= getattr(obj, "target_urls")[0] if hasattr(obj , "target_urls") and len(getattr(obj, "target_urls")) >= 1 else "http://example.com")
-        mock_scan_context = ScanContext(
-            scan_id="test-scan-1",
-            start_time=datetime.utcnow(),
-            config=mock_scan_config,
-            http_client=gen_http_client(),
-            crawler=None
-        )
-        mock_plugin_config = PluginConfig()
-        
-        param = obj or PluginContext(
-            plugin_name="test_plugin",
-            scan_context=mock_scan_context,
-            plugin_config=mock_plugin_config
-        )
+        # 딕셔너리로 전달된 경우 처리
+        if isinstance(obj, dict):
+            target_url = obj.get("target_urls", ["http://example.com"])[0] if obj.get("target_urls") else "http://example.com"
+            http_client = obj.get("http_client", gen_http_client())
+            target_urls = obj.get("target_urls", ["http://example.com"])
+            
+            mock_scan_config = ScanConfig(target_url=target_url)
+            mock_scan_context = ScanContext(
+                scan_id="test-scan-1",
+                start_time=datetime.utcnow(),
+                config=mock_scan_config,
+                http_client=http_client,
+                crawler=None
+            )
+            mock_plugin_config = PluginConfig()
+            
+            param = PluginContext(
+                plugin_name="test_plugin",
+                scan_context=mock_scan_context,
+                plugin_config=mock_plugin_config,
+                target_urls=target_urls
+            )
+        else:
+            # PluginContext 인스턴스이거나 None인 경우
+            mock_scan_config = ScanConfig(target_url= getattr(obj, "target_urls")[0] if hasattr(obj , "target_urls") and len(getattr(obj, "target_urls")) >= 1 else "http://example.com")
+            mock_scan_context = ScanContext(
+                scan_id="test-scan-1",
+                start_time=datetime.utcnow(),
+                config=mock_scan_config,
+                http_client=gen_http_client(),
+                crawler=None
+            )
+            mock_plugin_config = PluginConfig()
+            
+            param = obj or PluginContext(
+                plugin_name="test_plugin",
+                scan_context=mock_scan_context,
+                plugin_config=mock_plugin_config
+            )
         self.__dict__.update(to_mock_interface(param, class_type=PluginContext).__dict__)
 
 
