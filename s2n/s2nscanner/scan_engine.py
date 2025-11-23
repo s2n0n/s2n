@@ -26,7 +26,7 @@ except ImportError:  # pragma: no cover - <py3.8 fallback>
     import importlib_metadata  # type: ignore
 
 from s2n.s2nscanner.finding import create_plugin_result, create_scan_report
-from s2n.s2nscanner.http.client import HttpClient
+from s2n.s2nscanner.clients.http_client import HttpClient
 from s2n.s2nscanner.interfaces import (
     Confidence,
     Finding,

@@ -1,7 +1,6 @@
+from test.mock_data import MockHTTPClient
 from test.mock_data import MockPluginContext
-from types import SimpleNamespace
 from s2n.s2nscanner.plugins.csrf import csrf_main
-from s2n.s2nscanner.plugins.csrf import csrf_scan as csrf_scan_module
 from s2n.s2nscanner.interfaces import Finding, PluginStatus, Severity, PluginResult
 
 
@@ -16,13 +15,13 @@ def test_main_run_uses_csrf_scan(monkeypatch):
         description="fake",
     )
 
-    # monkeypatch csrf_scan function to return a list
-    monkeypatch.setattr(csrf_scan_module, "csrf_scan", lambda url, http_client=None, plugin_context=None: [fake_finding])
+    # monkeypatch csrf_scan function in csrf_main module (not csrf_scan_module)
+    monkeypatch.setattr(csrf_main, "csrf_scan", lambda url, http_client=None, plugin_context=None: [fake_finding])
 
-    # mock http client exposing .s (session)
-    session = SimpleNamespace(headers={})
-    http_client = SimpleNamespace(s=session)
-    plugin_context = MockPluginContext(http_client=http_client, target_urls=["http://example.local"]) 
+    plugin_context = MockPluginContext(obj={
+        "http_client": MockHTTPClient(),
+        "target_urls": ["http://example.local"]
+    }) 
 
     scanner = csrf_main.main()
     result = scanner.run(plugin_context)  # type: ignore[arg-type]

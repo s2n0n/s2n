@@ -20,7 +20,7 @@ import time
 from threading import Lock
 from typing import List, Tuple, Optional, Dict
 from urllib.parse import urljoin
-from s2n.s2nscanner.http.client import HttpClient
+from s2n.s2nscanner.clients.http_client import HttpClient
 
 class DVWAAdapter:
     def __init__(self, base_url: str, login_path="/login.php", index_path="/index.php", client: Optional[HttpClient] = None):

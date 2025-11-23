@@ -1,5 +1,6 @@
+from html.parser import HTMLParser
 from types import SimpleNamespace
-from typing import  Optional, Type, TypeVar, ClassVar
+from typing import  Optional, Type, TypeVar, ClassVar, Any
 
 
 # 모의 클래스 프로토타입 정의
@@ -8,7 +9,7 @@ from typing import  Optional, Type, TypeVar, ClassVar
 V = ClassVar[dict]
 
 class MockClassPrototype:
-    def __init__(self, init_param: None | V = None,):
+    def __init__(self, init_param: Any | None = None,):
         self.init_param = init_param or SimpleNamespace().__dict__
         
         for key, value in self.init_param.items():
@@ -65,3 +66,26 @@ def to_mock_interface(obj: Optional[T], class_type: Type[T]) -> T:
 
     raise TypeError(f"Cannot convert object of type {type(obj)!r} to {class_type.__name__}")
 
+
+"========== Common Util Class========="
+
+class FormParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.forms = []
+        self.current_form = None
+        self.current_input = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'form':
+            self.current_form = {'inputs': []}
+            self.forms.append(self.current_form)
+        elif tag == 'input':
+            self.current_input = {'name': attrs.get('name'), 'value': attrs.get('value')}
+            self.current_form['inputs'].append(self.current_input)
+
+    def handle_endtag(self, tag):
+        if tag == 'form':
+            self.current_form = None
+        elif tag == 'input':
+            self.current_input = None
