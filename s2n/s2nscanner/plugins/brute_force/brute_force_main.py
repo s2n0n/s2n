@@ -38,6 +38,32 @@ class BruteForcePlugin:
         # config 타입을 PluginConfig 대신 Any로 받아 유연성을 확보합니다.
         self.config = config
 
+    def _request_user_confirmation(self, logger) -> bool:
+        """
+        사용자에게 무차별 대입 공격 실행 여부를 확인합니다.
+        """
+        warning_message = (
+            "\n[WARNING] 이 플러그인은 실제로 무차별 대입 공격(Brute Force)을 수행합니다.\n"
+            "이로 인해 발생하는 법적 문제나 서버 부하, 계정 잠금 등의 문제에 대해 책임지지 않습니다.\n"
+            "그래도 진행하시겠습니까? (Y/N): "
+        )
+        
+        # 로거에는 기록만 남기고, 실제 입력은 표준 입출력 사용
+        logger.warning("사용자 동의 대기 중...")
+        
+        try:
+            response = input(warning_message).strip().lower()
+            if response in ['y', 'yes']:
+                logger.info("사용자가 동의하여 스캔을 시작합니다.")
+                return True
+            else:
+                logger.warning("사용자가 동의하지 않아 스캔을 중단합니다.")
+                return False
+        except EOFError:
+            # 입력 스트림이 닫혀있는 경우 (비대화형 환경 등)
+            logger.error("입력을 받을 수 없는 환경입니다. 스캔을 중단합니다.")
+            return False
+
     def run(self, plugin_context: PluginContext) -> PluginResult:
         # S2N 플러그인의 메인 실행 로직.
         logger = plugin_context.logger
@@ -48,6 +74,19 @@ class BruteForcePlugin:
         error: Optional[PluginError] = None
 
         logger.info("--- 🛡️ Brute Force (무차별 대입) 탐지 스캐너 시작 ---")
+
+        # 0. 사용자 동의 확인
+        if not self._request_user_confirmation(logger):
+            logger.info("사용자가 스캔을 취소했습니다.")
+            return PluginResult(
+                plugin_name=plugin_context.plugin_name,
+                status=PluginStatus.SKIPPED,
+                start_time=start_time,
+                end_time=datetime.now(),
+                duration_seconds=(datetime.now() - start_time).total_seconds(),
+                requests_sent=requests_sent,
+                findings=[]
+            )
 
         # 1. 대상 URL 유효성 검사
         if not target_url or not target_url.startswith('http'):
