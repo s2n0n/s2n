@@ -157,7 +157,7 @@ class SQLInjectionPlugin:
 
         vulnerabilities = []
         requests_sent = 0
-        success_payload = "' OR 1=1 -- "
+        success_payload = "' OR '1'='1' -- "
 
         for param in param_names:
             # 1. 성공/에러 기반 탐지
