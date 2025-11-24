@@ -21,20 +21,6 @@ from s2n.s2nscanner.logger import get_logger
 
 logger = get_logger("plugins.soft_brute_force")
 
-# 기본적으로 점검할 id/pw 목록
-DEFAULT_CREDENTIALS = [
-    ("admin", "admin"),
-    ("admin", "password"),
-    ("root", "root"),
-    ("root", "password"),
-    ("user", "user"),
-    ("test", "test"),
-    ("guest", "guest"),
-    ("admin", "1234"),
-    ("admin", "123456"),
-    ("administrator", "password"),
-]
-
 # 속도 제한 우회 또는 미적용 여부 확인을 위한 파라미터
 RATE_LIMIT_ATTEMPTS = 10
 RATE_LIMIT_DELAY = 0.1  # 매우 짧은 간격으로 요청 -> 차단 여부 확인
@@ -45,7 +31,6 @@ class SoftBruteForcePlugin:
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}
-        self.credentials = self.config.get("credentials", DEFAULT_CREDENTIALS)
         self.rate_limit_attempts = int(self.config.get("rate_limit_attempts", RATE_LIMIT_ATTEMPTS))
 
     def run(self, plugin_context: PluginContext) -> PluginResult:
@@ -60,15 +45,10 @@ class SoftBruteForcePlugin:
             # 대상 타겟 URL 확보
             target_url = self._resolve_target_url(plugin_context)
             
-            # 1. Rate Limiting 탐지
+            # Rate Limiting 탐지
             rl_findings, rl_reqs = self._check_rate_limiting(client, target_url)
             findings.extend(rl_findings)
             requests_sent += rl_reqs
-            
-            # 2. Default Credential 탐지
-            dc_findings, dc_reqs = self._check_default_credentials(client, target_url)
-            findings.extend(dc_findings)
-            requests_sent += dc_reqs
 
             status = PluginStatus.SUCCESS
             if not findings:
@@ -193,49 +173,6 @@ class SoftBruteForcePlugin:
         
         return findings, requests_sent
 
-    def _check_default_credentials(self, client: HttpClient, url: str) -> Tuple[List[Finding], int]:
-        """
-        Default Credential 확인 메서드
-
-        방식:
-        - admin/admin, root/root 등 전형적인 기본 계정정보로 로그인 시도
-        - 성공 판단 기준(단순 휴리스틱)
-            1) 301/302 Redirect 발생
-            2) 응답 텍스트에 'welcome', 'logout' 존재
-            3) 실패 응답과 다른 패턴(길이/상태 변화)이 관찰될 경우
-        """
-        findings = []
-        requests_sent = 0
-        logger.info("Checking default credentials on %s", url)
-
-        for username, password in self.credentials:
-            data = {"username": username, "password": password}
-            try:
-                resp = client.post(url, data=data)
-                requests_sent += 1
-                
-                # Simple success check: 
-                # 1. Redirect (302) often means success
-                # 2. "Welcome" or "Logout" in text
-                # 3. Different response length/status compared to failure
-                
-                # Note: This is a heuristic. A real implementation needs baseline comparison.
-                if resp.status_code in [302, 301] or "welcome" in resp.text.lower() or "logout" in resp.text.lower():
-                     findings.append(Finding(
-                        id=f"soft-bf-default-cred-{uuid4().hex[:8]}",
-                        plugin=self.name,
-                        severity=Severity.HIGH,
-                        title="Default Credentials Found",
-                        description=f"Login appeared successful with default credentials: {username}/{password}",
-                        url=url,
-                        payload=f"{username}/{password}",
-                        confidence=Confidence.TENTATIVE,
-                        evidence=f"Response status: {resp.status_code}"
-                    ))
-            except Exception as e:
-                logger.debug("Request failed during default cred check: %s", e)
-                
-        return findings, requests_sent
 
 def main(config: Optional[Dict[str, Any]] = None) -> SoftBruteForcePlugin:
     return SoftBruteForcePlugin(config)
