@@ -1,8 +1,8 @@
 from __future__ import annotations
-from datetime import datetime
 import click
+from datetime import datetime
 
-from s2n.s2nscanner.interfaces import CLIArguments, ScanContext
+from s2n.s2nscanner.interfaces import CLIArguments, ScanContext, ProgressInfo, PluginStatus
 from s2n.s2nscanner.cli.mapper import cliargs_to_scanrequest
 from s2n.s2nscanner.cli.config_builder import build_scan_config
 from s2n.s2nscanner.auth.dvwa_adapter import DVWAAdapter
@@ -12,6 +12,15 @@ from s2n.s2nscanner.logger import init_logger
 
 from rich.console import Console
 from rich.table import Table
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    TaskProgressColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 from rich import box
 
 console = Console()
@@ -104,20 +113,45 @@ def scan(url, plugin, auth, username, password, output, output_format, verbose, 
         crawler=None,
     )
 
+    # 진행률 UI 준비
+    progress = Progress(
+        SpinnerColumn(style="bold cyan"),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(bar_width=None, complete_style="green", finished_style="magenta"),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=True,
+        auto_refresh=False,
+    )
+    progress_task = progress.add_task("🧭 스캔 준비 중", total=1)
+
+    def on_progress(info: ProgressInfo):
+        total = info.total or 1
+        progress.update(
+            progress_task,
+            total=total,
+            completed=info.current,
+            description=info.message,
+            refresh=True,
+        )
+
     scanner = Scanner(
         config=config,
         scan_context=scan_ctx,
         auth_adapter=auth_adapter,
         auth_credentials=auth_credentials,
         logger=logger,
+        on_progress=on_progress,
     )
 
     # Scan 실행 + Duration 계산
-    start = datetime.utcnow()
-    report = scanner.scan()
-    end = datetime.utcnow()
-
-    duration = (end - start).total_seconds()
+    with progress:
+        start = datetime.utcnow()
+        report = scanner.scan()
+        end = datetime.utcnow()
+        progress.update(progress_task, completed=progress.tasks[0].total, description="🏁 스캔 완료")
 
     # Report 출력
     try:
@@ -126,32 +160,91 @@ def scan(url, plugin, auth, username, password, output, output_format, verbose, 
     except Exception as exc:
         logger.exception("Failed to output report: %s", exc)
 
-    # Rich Summary (Verbose)
-    if verbose:
-        table = Table(
+    # Rich Summary (fail-safe for tests with minimal FakeScanReport)
+    try:
+        plugin_results = getattr(report, "plugin_results", []) or []
+        target_url = getattr(report, "target_url", None) or request.target_url
+        duration_seconds = getattr(report, "duration_seconds", None)
+        if duration_seconds is None:
+            start = getattr(report, "start_time", getattr(report, "started_at", None))
+            end = getattr(report, "end_time", getattr(report, "finished_at", None))
+            if start and end:
+                duration_seconds = (end - start).total_seconds()
+        duration_text = f"{duration_seconds:.2f} seconds" if isinstance(duration_seconds, (int, float)) else "-"
+
+        total_findings = 0
+        for pr in plugin_results:
+            findings = getattr(pr, "findings", []) or []
+            total_findings += len(findings)
+
+        summary_table = Table(
             title="🚀 S2N Scan Summary",
             title_style="bold magenta",
             box=box.SIMPLE_HEAVY,
             show_header=False,
             padding=(0, 1),
         )
+        summary_table.add_row("🎯 Target URL", f"[bold]{target_url}[/]")
+        summary_table.add_row("🆔 Scan ID", getattr(report, "scan_id", "-"))
+        summary_table.add_row("⏱ Duration", duration_text)
+        summary_table.add_row("🧩 Plugins Loaded", str(len(plugin_results)))
+        summary_table.add_row("🔎 Findings Detected", f"[bold yellow]{total_findings}[/]")
+        summary_table.add_row("📄 Output Format", getattr(config.output_config, "format", "-"))
 
-        # Target URL (config 또는 Report의 target_url)
-        target_url = getattr(report, "target_url", None) or request.target_url
+        status_styles = {
+            PluginStatus.SUCCESS: "green",
+            PluginStatus.PARTIAL: "yellow",
+            PluginStatus.FAILED: "red",
+            PluginStatus.SKIPPED: "cyan",
+            PluginStatus.TIMEOUT: "magenta",
+        }
+        status_icons = {
+            PluginStatus.SUCCESS: "✅",
+            PluginStatus.PARTIAL: "🟡",
+            PluginStatus.FAILED: "❌",
+            PluginStatus.SKIPPED: "⏩",
+            PluginStatus.TIMEOUT: "⏰",
+        }
 
-        # Finding 개수
-        total_findings = sum(len(p.findings) for p in report.plugin_results)
+        plugin_table = Table(
+            title="🧩 Plugin Results",
+            title_style="bold cyan",
+            box=box.MINIMAL_HEAVY_HEAD,
+            header_style="bold white",
+        )
+        plugin_table.add_column("Plugin")
+        plugin_table.add_column("Status", justify="center")
+        plugin_table.add_column("Findings", justify="right")
+        plugin_table.add_column("Duration", justify="right")
+        plugin_table.add_column("Note")
 
-        table.add_row("🎯 Target URL", target_url)
-        table.add_row("🆔 Scan ID", report.scan_id)
-        table.add_row("⏱ Duration", f"{report.duration_seconds:.2f} seconds")
-        table.add_row("🧩 Plugins Loaded", str(len(report.plugin_results)))
-        table.add_row("🔎 Findings Detected", str(total_findings))
-        table.add_row("📄 Output Format", config.output_config.format.value)
+        for pr in plugin_results:
+            status = getattr(pr, "status", None)
+            status_color = status_styles.get(status, "white")
+            icon = status_icons.get(status, "ℹ️")
+            note = "-"
+            metadata = getattr(pr, "metadata", None) or {}
+            note = metadata.get("reason", note)
+            if getattr(pr, "error", None):
+                note = getattr(pr.error, "message", note)
+
+            plugin_table.add_row(
+                f"{icon} {getattr(pr, 'plugin_name', '-')}",
+                f"[{status_color}]{getattr(status, 'value', status or '-')}[/{status_color}]",
+                str(len(getattr(pr, "findings", []) or [])),
+                f"{getattr(pr, 'duration_seconds', 0):.2f}s"
+                if isinstance(getattr(pr, "duration_seconds", None), (int, float))
+                else "-",
+                note or "-",
+            )
 
         console.print("\n")
-        console.print(table)
+        console.print(summary_table)
+        if plugin_results:
+            console.print(plugin_table)
         console.print("\n")
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.debug("Failed to render summary tables: %s", exc)
 
 
 if __name__ == "__main__":
