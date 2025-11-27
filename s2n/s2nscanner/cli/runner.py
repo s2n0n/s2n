@@ -200,7 +200,7 @@ def scan(
         )
         summary_table.add_row("🎯 Target URL", f"[bold]{target_url}[/]")
         summary_table.add_row("🆔 Scan ID", getattr(report, "scan_id", "-"))
-        summary_table.add_row("⏱ Duration", duration_text)
+        summary_table.add_row(" ⏱ Duration", duration_text)
         summary_table.add_row("🧩 Plugins Loaded", str(len(plugin_results)))
         summary_table.add_row(
             "🔎 Findings Detected", f"[bold yellow]{total_findings}[/]"
