@@ -8,14 +8,18 @@ ScanReport 객체를 콘솔 출력용 문자열로 변환하는 기능을 제공
 """
 
 from __future__ import annotations
+import io
 from pathlib import Path
-from typing import List
+
+from rich.console import Console
+from rich.table import Table
+from rich import box
 
 from s2n.s2nscanner.interfaces import (
     ScanReport,
     Severity,
     ConsoleMode,
-    ConsoleOutput,
+    PluginStatus,
 )
 from s2n.s2nscanner.report.base import ReportFormatter
 
@@ -25,96 +29,142 @@ class ConsoleFormatter(ReportFormatter):
     Console 형식 Formatter
 
     기능:
-    - ScanReport → 콘솔 요약/상세 문자열 생성
-    - save()는 no-op 처리 (혹은 파일 저장 지원 가능하지만 일반적으로 필요 없음)
+    - ScanReport → 콘솔 요약/상세 문자열 생성 (Rich 라이브러리 사용)
+    - save()는 no-op 처리
     """
 
     def __init__(self, mode: ConsoleMode = ConsoleMode.SUMMARY):
         self.mode = mode
 
     def format(self, report: ScanReport) -> str:
-        """ScanReport를 사람이 읽기 좋은 콘솔 출력 문자열로 변환"""
+        """ScanReport를 Rich 라이브러리를 사용하여 스타일링된 문자열로 변환"""
+        
+        # Capture rich output to string
+        buffer = io.StringIO()
+        console = Console(file=buffer, force_terminal=True, width=100)
 
-        summary_lines: List[str] = []
-        detail_lines: List[str] = []
-
-        # Summary Header
-        summary_lines.append("=" * 60)
-        summary_lines.append("Scan Report Summary")
-        summary_lines.append("=" * 60)
-        summary_lines.append(f"Target URL: {report.target_url}")
-        summary_lines.append(f"Scan ID: {report.scan_id}")
-        summary_lines.append(f"Scanner Version: {report.scanner_version}")
-        summary_lines.append(f"Duration: {report.duration_seconds:.2f} seconds")
-        summary_lines.append("")
-
-        # Summary Data
-        if report.summary:
-            s = report.summary
-            summary_lines.append(f"Total Vulnerabilities: {s.total_vulnerabilities}")
-            summary_lines.append(f"Total URLs Scanned: {s.total_urls_scanned}")
-            summary_lines.append(f"Total Requests: {s.total_requests}")
-            summary_lines.append(f"Success Rate: {s.success_rate:.1f}%")
-            summary_lines.append("")
-
-            # Severity Breakdown
-            if s.severity_counts:
-                summary_lines.append("Severity Breakdown:")
-                for sev in [
-                    Severity.CRITICAL,
-                    Severity.HIGH,
-                    Severity.MEDIUM,
-                    Severity.LOW,
-                    Severity.INFO,
-                ]:
-                    cnt = s.severity_counts.get(sev, 0)
-                    if cnt > 0:
-                        summary_lines.append(f"  {sev.value}: {cnt}")
-
-            # Plugin Breakdown
-            if s.plugin_counts:
-                summary_lines.append("")
-                summary_lines.append("Plugin Breakdown:")
-                for plugin_name, count in s.plugin_counts.items():
-                    summary_lines.append(f"  {plugin_name}: {count}")
-
-        # Detailed Section
-        if self.mode in [ConsoleMode.VERBOSE, ConsoleMode.DEBUG]:
-            detail_lines.append("")
-            detail_lines.append("=" * 60)
-            detail_lines.append("Detailed Findings")
-            detail_lines.append("=" * 60)
-
-            for plugin_result in report.plugin_results:
-                if plugin_result.findings:
-                    detail_lines.append("")
-                    detail_lines.append(f"Plugin: {plugin_result.plugin_name}")
-                    detail_lines.append(f"Status: {plugin_result.status.value}")
-                    detail_lines.append(f"Findings: {len(plugin_result.findings)}")
-                    detail_lines.append("-" * 60)
-
-                    for f in plugin_result.findings:
-                        detail_lines.append(f"  [{f.severity.value}] {f.title}")
-                        if f.url:
-                            detail_lines.append(f"    URL: {f.url}")
-                        if f.parameter:
-                            detail_lines.append(f"    Parameter: {f.parameter}")
-                        if f.method:
-                            detail_lines.append(f"    Method: {f.method}")
-                        if f.payload:
-                            detail_lines.append(f"    Payload: {f.payload}")
-                        if f.description:
-                            detail_lines.append(f"    Description: {f.description}")
-                        detail_lines.append("")
-
-        output = ConsoleOutput(
-            mode=self.mode,
-            summary_lines=summary_lines,
-            detail_lines=detail_lines,
+        # 1. Summary Table
+        target_url = report.target_url
+        duration_seconds = report.duration_seconds
+        
+        duration_text = (
+            f"{duration_seconds:.2f} seconds"
+            if isinstance(duration_seconds, (int, float))
+            else "-"
         )
 
-        # format()은 문자열 반환이므로 join 처리
-        return "\n".join(output.summary_lines + output.detail_lines)
+        plugin_results = report.plugin_results or []
+        total_findings = 0
+        for pr in plugin_results:
+            findings = getattr(pr, "findings", []) or []
+            total_findings += len(findings)
+
+        summary_table = Table(
+            title="🚀 S2N Scan Summary",
+            title_style="bold magenta",
+            box=box.SIMPLE_HEAVY,
+            show_header=False,
+            padding=(0, 1),
+        )
+        summary_table.add_row("🎯 Target URL", f"[bold]{target_url}[/]")
+        summary_table.add_row("🆔 Scan ID", getattr(report, "scan_id", "-"))
+        summary_table.add_row(" ⏱ Duration", duration_text)
+        summary_table.add_row("🧩 Plugins Loaded", str(len(plugin_results)))
+        summary_table.add_row(
+            "🔎 Findings Detected", f"[bold yellow]{total_findings}[/]"
+        )
+        
+        # Summary Data from report.summary if available
+        if report.summary:
+            s = report.summary
+            summary_table.add_row("📊 Success Rate", f"{s.success_rate:.1f}%")
+            summary_table.add_row("🌐 URLs Scanned", str(s.total_urls_scanned))
+
+        console.print("\n")
+        console.print(summary_table)
+
+        # 2. Plugin Results Table
+        status_styles = {
+            PluginStatus.SUCCESS: "green",
+            PluginStatus.PARTIAL: "yellow",
+            PluginStatus.FAILED: "red",
+            PluginStatus.SKIPPED: "cyan",
+            PluginStatus.TIMEOUT: "magenta",
+        }
+        status_icons = {
+            PluginStatus.SUCCESS: "✅",
+            PluginStatus.PARTIAL: "🟡",
+            PluginStatus.FAILED: "❌",
+            PluginStatus.SKIPPED: "⏩",
+            PluginStatus.TIMEOUT: "⏰",
+        }
+
+        plugin_table = Table(
+            title="🧩 Plugin Results",
+            title_style="bold cyan",
+            box=box.MINIMAL_HEAVY_HEAD,
+            header_style="bold white",
+        )
+        plugin_table.add_column("Plugin")
+        plugin_table.add_column("Status", justify="center")
+        plugin_table.add_column("Findings", justify="right")
+        plugin_table.add_column("Duration", justify="right")
+        plugin_table.add_column("Note")
+
+        for pr in plugin_results:
+            status = getattr(pr, "status", None)
+            status_color = status_styles.get(status, "white")
+            icon = status_icons.get(status, "ℹ️")
+            note = "-"
+            metadata = getattr(pr, "metadata", None) or {}
+            note = metadata.get("reason", note)
+            if getattr(pr, "error", None):
+                note = getattr(pr.error, "message", note)
+
+            plugin_table.add_row(
+                f"{icon} {getattr(pr, 'plugin_name', '-')}",
+                f"[{status_color}]{getattr(status, 'value', status or '-')}[/{status_color}]",
+                str(len(getattr(pr, "findings", []) or [])),
+                f"{getattr(pr, 'duration_seconds', 0):.2f}s"
+                if isinstance(getattr(pr, "duration_seconds", None), (int, float))
+                else "-",
+                note or "-",
+            )
+
+        if plugin_results:
+            console.print("\n")
+            console.print(plugin_table)
+            console.print("\n")
+
+        # 3. Detailed Findings (if verbose)
+        if self.mode in [ConsoleMode.VERBOSE, ConsoleMode.DEBUG]:
+            console.print("[bold underline]Detailed Findings[/bold underline]\n")
+            
+            for plugin_result in report.plugin_results:
+                if plugin_result.findings:
+                    console.print(f"[bold cyan]Plugin: {plugin_result.plugin_name}[/bold cyan]")
+                    
+                    for f in plugin_result.findings:
+                        severity_color = "white"
+                        if f.severity == Severity.CRITICAL:
+                            severity_color = "red bold"
+                        elif f.severity == Severity.HIGH:
+                            severity_color = "red"
+                        elif f.severity == Severity.MEDIUM:
+                            severity_color = "yellow"
+                        elif f.severity == Severity.LOW:
+                            severity_color = "blue"
+                        
+                        console.print(f"  [{severity_color}][{f.severity.value}] {f.title}[/{severity_color}]")
+                        if f.url:
+                            console.print(f"    URL: {f.url}")
+                        if f.parameter:
+                            console.print(f"    Parameter: {f.parameter}")
+                        if f.payload:
+                            console.print(f"    Payload: {f.payload}")
+                        console.print("")
+
+        return buffer.getvalue()
 
     def save(self, report: ScanReport, path: Path):
         # no-op
