@@ -25,6 +25,7 @@ from s2n.s2nscanner.interfaces import (
     Severity,
 )
 from s2n.s2nscanner.logger import get_logger
+from s2n.s2nscanner.crawler import crawl_recursive
 
 
 logger = get_logger("plugins.xss")
@@ -138,6 +139,10 @@ class InputPointDetector:
             params = {
                 k: v[0] if isinstance(v, list) else v for k, v in url_params.items()
             }
+            # Use self.logger if available, else global logger (InputPointDetector doesn't have logger ref)
+            # For now, keep global logger or pass it down. 
+            # Since InputPointDetector is separate, we'll leave it as is or refactor it to accept logger.
+            # Given the constraints, I will leave global logger here as it's a helper class.
             logger.info("[DETECT] Query parameters: %s", list(params.keys()))
             points.append(
                 InputPoint(
@@ -264,6 +269,7 @@ class ReflectedScanner:
         payloads_path: Path,
         http_client: Any,
         cookies: Optional[Dict[str, str]] = None,
+        depth: int = 2,
     ):
         if http_client is None:
             raise ValueError(
@@ -271,12 +277,14 @@ class ReflectedScanner:
             )
 
         self.transport = http_client
+        self.depth = depth
         self._setup_session(http_client, cookies)
         self.payloads = self._load_payloads(payloads_path)
         self.detector = InputPointDetector(self.transport)
         self.findings: Dict[str, Finding] = {}
         self._requests_sent = 0
         self._urls_scanned = 0
+        self.logger = logger  # Default logger
 
     # TODO: context_client -> http_client 공용 모듈 및 크롤러 사용하도록 변경
     def _setup_session(
@@ -455,6 +463,9 @@ class ReflectedScanner:
     def run(self, context: PluginContext) -> PluginResult:
         start_dt = datetime.now(timezone.utc)
         self._reset_state()
+        
+        # Update logger from context
+        self.logger = getattr(context, "logger", None) or logger
 
         # 설정 추출
         config = self._extract_config(context)
@@ -471,7 +482,20 @@ class ReflectedScanner:
             status = PluginStatus.SKIPPED
         else:
             try:
-                for url in target_urls:
+                # 크롤러를 사용하여 각 target URL에서 추가 URL 발견
+                all_urls = []
+                for base_url in target_urls:
+                    crawled_urls = crawl_recursive(base_url, http_client, depth=self.depth, timeout=timeout)
+                    all_urls.extend(crawled_urls)
+                
+                # 중복 제거
+                all_urls = list(dict.fromkeys(all_urls))
+                self.logger.info(f"[XSS] Crawled {len(all_urls)} URLs from {len(target_urls)} target(s)")
+                
+                # 모든 발견된 URL 스캔
+                total_urls = len(all_urls)
+                for idx, url in enumerate(all_urls, 1):
+                    self.logger.info(f"[*] Scanning URL {idx}/{total_urls}: {url}")
                     self._scan_single_url(url, http_client, max_payloads, timeout)
             except Exception as exc:  # noqa: BLE001
                 status = PluginStatus.FAILED
@@ -481,7 +505,7 @@ class ReflectedScanner:
                     traceback=None,
                     context={"target_urls": target_urls},
                 )
-                logger.exception("XSS 스캐너 에러: %s", exc)
+                self.logger.exception("XSS 스캐너 에러: %s", exc)
 
         # 결과 생성
         return self._build_result(context, start_dt, status, plugin_error)

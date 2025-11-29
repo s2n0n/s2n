@@ -8,7 +8,6 @@ ScanReport 객체를 CSV 문자열로 직렬화하고 파일로 저장하는 기
 
 from __future__ import annotations
 from pathlib import Path
-from typing import List
 import csv
 import io
 

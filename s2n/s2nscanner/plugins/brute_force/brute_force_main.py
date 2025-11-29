@@ -37,6 +37,8 @@ class BruteForcePlugin:
     def __init__(self, config: Any = None):
         # config 타입을 PluginConfig 대신 Any로 받아 유연성을 확보합니다.
         self.config = config
+        # depth: config에서 가져오거나 기본값 2 사용 (참고용, brute force는 crawler 미사용)
+        self.depth = int(getattr(config, "depth", 2)) if config else 2
 
     def _request_user_confirmation(self, logger) -> bool:
         """
@@ -44,24 +46,26 @@ class BruteForcePlugin:
         Y/N 외의 입력은 반복해서 재질문하여 오타 입력 시 바로 스킵되지 않도록 합니다.
         """
         warning_message = (
-            "\n[WARNING] 이 플러그인은 실제로 무차별 대입 공격(Brute Force)을 수행합니다.\n"
+            "\n\033[91m[WARNING]\033[0m This plugin performs an actual Brute Force attack.\n"
+            "We are not responsible for any legal issues, server load, or account lockouts caused by this.\n"
+            "이 플러그인은 실제로 무차별 대입 공격(Brute Force)을 수행합니다.\n"
             "이로 인해 발생하는 법적 문제나 서버 부하, 계정 잠금 등의 문제에 대해 책임지지 않습니다.\n"
-            "그래도 진행하시겠습니까? (Y/N): "
+            "\nDo you want to proceed? / 그래도 진행하시겠습니까? (Y/N): "
         )
 
-        logger.warning("사용자 동의 대기 중...")
+        logger.warning("Waiting for user confirmation... / 사용자 동의 대기 중...")
 
         try:
             while True:
                 response = input(warning_message).strip().lower()
                 if response in ("y", "yes"):
-                    logger.info("사용자가 동의하여 스캔을 시작합니다.")
+                    logger.info("User agreed. Starting scan. / 사용자가 동의하여 스캔을 시작합니다.")
                     return True
                 if response in ("n", "no"):
-                    logger.warning("사용자가 동의하지 않아 스캔을 중단합니다.")
+                    logger.warning("User disagreed. Stopping scan. / 사용자가 동의하지 않아 스캔을 중단합니다.")
                     return False
 
-                logger.warning("Y 또는 N으로 입력해주세요. (예: y, n)")
+                logger.warning("Please enter Y or N. / Y 또는 N으로 입력해주세요. (예: y, n)")
         except EOFError:
             # 입력 스트림이 닫혀있는 경우 (비대화형 환경 등)
             logger.error("입력을 받을 수 없는 환경입니다. 스캔을 중단합니다.")
