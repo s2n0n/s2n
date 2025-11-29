@@ -49,8 +49,11 @@ class FileUploadPlugin:
         if plugin_cfg and getattr(plugin_cfg, "custom_params", None):
             depth = int(plugin_cfg.custom_params.get("depth", depth))
 
+        # Logger setup
+        log = plugin_context.logger or logger
+
         try:
-            logger.info("[*] Starting file upload scan on: %s (depth=%d)", target_url, depth)
+            log.info("[*] Starting file upload scan on: %s (depth=%d)", target_url, depth)
             
             # 1. Initial request and authentication
             resp = http_client.get(target_url, timeout=10)
@@ -60,12 +63,13 @@ class FileUploadPlugin:
 
             # 2. Crawl to discover URLs
             crawled_urls = crawl_recursive(target_url, http_client, depth=depth, timeout=10)
-            logger.info("[*] Discovered %d URLs to scan for upload forms", len(crawled_urls))
+            log.info("[*] Discovered %d URLs to scan for upload forms", len(crawled_urls))
             
             # 3. Search for upload forms across discovered URLs
-            for url in crawled_urls:
+            total_urls = len(crawled_urls)
+            for idx, url in enumerate(crawled_urls, 1):
                 try:
-                    logger.info("[*] Checking for upload form at: %s", url)
+                    log.info(f"[*] Scanning URL {idx}/{total_urls}: {url}")
                     page_resp = http_client.get(url, timeout=10)
                     stats["requests_sent"] += 1
                     stats["urls_scanned"] += 1
@@ -74,7 +78,7 @@ class FileUploadPlugin:
                     if not form:
                         continue
                     
-                    logger.info("[+] Found upload form at: %s", url)
+                    log.info("[+] Found upload form at: %s", url)
                     
                     # Prepare upload parameters
                     action = form.get("action") or url
@@ -82,30 +86,30 @@ class FileUploadPlugin:
                     method = str(form.get("method", "post")).lower()
                     
                     if method != "post":
-                        logger.warning("Form method is not POST (method=%s). Skipping.", method)
+                        log.warning("Form method is not POST (method=%s). Skipping.", method)
                         continue
                     
                     data = collect_form_data(form)
                     file_input = next((i for i in form.inputs if i.get("type") == "file"), None)
                     if not file_input:
-                        logger.info("No file input found in form. Skipping.")
+                        log.info("No file input found in form. Skipping.")
                         continue
                     
                     file_field_name = str(file_input.get("name", "file"))
                     
                     # Execute upload tests
-                    logger.info("[*] Testing file upload at: %s", action_url)
+                    log.info("[*] Testing file upload at: %s", action_url)
                     new_findings = upload_test_files(
                         http_client, action_url, data, file_field_name, self.name, stats
                     )
                     findings.extend(new_findings)
                     
                 except Exception as e:
-                    logger.warning("Error scanning URL %s: %s", url, e)
+                    log.warning("Error scanning URL %s: %s", url, e)
                     continue
 
         except Exception as e:
-            logger.exception("[!] Error during file upload testing: %s", e)
+            log.exception("[!] Error during file upload testing: %s", e)
             return PluginError(
                 error_type=type(e).__name__,
                 message=str(e),

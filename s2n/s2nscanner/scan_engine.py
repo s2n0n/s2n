@@ -147,7 +147,10 @@ class Scanner:
             self.logger.error("Failed to import plugin package '%s': %s", PLUGIN_PACKAGE, exc)
             return []
 
+        excluded_modules = {"helper"}
         for _, modname, _ in pkgutil.iter_modules(package.__path__):
+            if modname in excluded_modules:
+                continue
             if self.allowed_plugins and modname.lower() not in self.allowed_plugins:
                 continue
             module_name = f"{PLUGIN_PACKAGE}.{modname}"
@@ -180,9 +183,9 @@ class Scanner:
         plugins = self.discover_plugins()
         total_plugins = len(plugins)
         if total_plugins:
-            self._emit_progress(0, total_plugins, "🧭 스캔 준비 중")
+            self._emit_progress(0, total_plugins, "🧭 Preparing Scan \n 스캔 준비 중")
         else:
-            self._emit_progress(0, 0, "⚠️ 실행할 플러그인이 없습니다.")
+            self._emit_progress(0, 0, "⚠️ Cannot find executable plugin \n 실행할 플러그인이 없습니다.")
 
         for idx, plugin in enumerate(plugins, start=1):
             plugin_name = getattr(plugin, "name", plugin.__class__.__name__)
@@ -192,7 +195,7 @@ class Scanner:
                 self._ensure_authenticated()
 
             self.logger.info(f"🔍 Executing plugin: {plugin_name}")
-            self._emit_progress(idx - 1, total_plugins, f"🔄 {plugin_name} 준비 중")
+            self._emit_progress(idx - 1, total_plugins, f"🔄 {plugin_name} Running")
             plugin_config = self._resolve_plugin_config(plugin_name)
             result: Optional[PluginResult] = None
 

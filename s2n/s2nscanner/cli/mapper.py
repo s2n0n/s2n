@@ -53,4 +53,5 @@ def cliargs_to_scanrequest(args: CLIArguments) -> ScanRequest:
         output_format=output_format,
         output_path=Path(args.output) if args.output else None,
         verbose=args.verbose,
+        depth=depth,
     )

@@ -54,25 +54,44 @@ def cli():
 
 # scan 명령어
 @cli.command("scan")
-@click.option("-u", "--url", required=True, help="스캔 대상 URL")
+@click.option("-u", "--url", required=True, help="""Target URL to scan\n스캔 대상 URL""")
 @click.option(
-    "-p", "--plugin", multiple=True, help="사용할 플러그인 이름 (복수 선택 가능)"
+    "-p",
+    "--plugin",
+    multiple=True,
+    help="Plugins to use (can be used multiple times) \n사용할 플러그인 이름 (복수 선택 가능)\n\n[options: csrf, sqlinjection, file_upload, oscommand, xss, brute_force, soft_brute_force]",
 )
-@click.option("-a", "--auth", help="인증 타입 (NONE, BASIC, BEARER, DVWA 등)")
-@click.option("--username", help="인증용 사용자명")
-@click.option("--password", help="인증용 비밀번호")
-@click.option("-o", "--output", help="결과 출력 파일 경로 (예: result.json)")
+@click.option(
+    "-a",
+    "--auth",
+    help="Authentication type \n인증 타입 \n\n(NONE, BASIC, BEARER, DVWA, etc.)",
+)
+@click.option("--username", help="Username for authentication \n인증용 사용자명")
+@click.option("--password", help="Password for authentication \n인증용 비밀번호")
+@click.option(
+    "-o", "--output", help="Output file path (e.g., result.json) \n 결과 출력 파일 경로"
+)
 @click.option(
     "--output-format",
     type=click.Choice([fmt.value for fmt in OutputFormat], case_sensitive=False),
     default=OutputFormat.JSON.value,
     show_default=True,
-    help="결과 출력 형식 (JSON, HTML, CSV, CONSOLE, MULTI)",
+    help="Output format / 결과 출력 형식 (JSON, HTML, CSV, CONSOLE, MULTI)",
 )
-@click.option("-v", "--verbose", is_flag=True, help="상세 로그 출력")
-@click.option("--log-file", help="로그 파일 경로")
+@click.option("--crawler-depth", default=2, help="Crawler depth / 크롤러 탐색 깊이")
+@click.option("-v", "--verbose", is_flag=True, help="Verbose logging / 상세 로그 출력")
+@click.option("--log-file", help="Log file path / 로그 파일 경로")
 def scan(
-    url, plugin, auth, username, password, output, output_format, verbose, log_file
+    url,
+    plugin,
+    auth,
+    username,
+    password,
+    output,
+    output_format,
+    crawler_depth,
+    verbose,
+    log_file,
 ):
     logger = init_logger(verbose, log_file)
     logger.info("Starting scan for %s", url)
@@ -86,6 +105,7 @@ def scan(
         password=password,
         output=output,
         output_format=output_format,
+        depth=crawler_depth,
         verbose=verbose,
         log_file=log_file,
     )

@@ -1,5 +1,6 @@
 import logging
 from logging.handlers import RotatingFileHandler
+from rich.logging import RichHandler
 
 LOGGER_NAME = "s2n"
 
@@ -15,13 +16,15 @@ def init_logger(verbose: bool=False, log_file: str=None) -> logging.Logger:
         return logger
     
     logger.setLevel(logging.DEBUG if verbose else logging.INFO)
-    fmt = logging.Formatter("[%(asctime)s] %(levelname)s in %(module)s: %(message)s")
-
-    sh = logging.StreamHandler()
-    sh.setFormatter(fmt)
-    logger.addHandler(sh)
+    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+    
+    # RichHandler for console output
+    rh = RichHandler(rich_tracebacks=True, show_time=True, show_level=True)
+    # Remove default formatter for RichHandler as it has its own
+    logger.addHandler(rh)
 
     if log_file:
+        fmt = logging.Formatter("[%(asctime)s] %(levelname)s in %(module)s: %(message)s")
         fh = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
         fh.setFormatter(fmt)
         logger.addHandler(fh)

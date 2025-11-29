@@ -32,6 +32,9 @@ class SQLInjectionPlugin:
         client = resolve_client(self, plugin_context)
         depth = resolve_depth(self, plugin_context)
         target_url = resolve_target_url(self, plugin_context)
+        
+        # Logger setup
+        log = plugin_context.logger or logger
 
         try:
             # Scan for SQL injection vulnerabilities (crawler integrated in sqli_scan)
@@ -45,7 +48,7 @@ class SQLInjectionPlugin:
             findings.extend(scan_result)
 
         except Exception as e:
-            logger.exception(f"[SQLInjectionPlugin.run] plugin error: {e}")
+            log.exception(f"[SQLInjectionPlugin.run] plugin error: {e}")
             return PluginResult(
                 plugin_name=self.name,
                 status=PluginStatus.FAILED,

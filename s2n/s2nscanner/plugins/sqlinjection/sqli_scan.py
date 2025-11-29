@@ -54,7 +54,11 @@ def sqli_scan(
 
     # 1. Scan GET parameters
     targets = crawl_recursive(base_url, http_client, depth=depth, timeout=timeout) or [base_url]
-    for target in targets:
+    total_targets = len(targets)
+    context_logger.info(f"[*] Discovered {total_targets} URLs to scan for SQL injection")
+
+    for idx, target in enumerate(targets, 1):
+        context_logger.info(f"[*] Scanning URL {idx}/{total_targets}: {target}")
         get_findings = _scan_get_param(http_client, base_url, target, get_params_from_url)
         results.extend(get_findings)
         form_findings = _scan_forms(http_client, target)
