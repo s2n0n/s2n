@@ -42,7 +42,14 @@ class CSRFScanner:
         try:
             # for 문이든 뭐든 써서,  target_urls로 개별 url 스캔 수행하게 만들기
 
-            for url in target_urls:
+            total_urls = len(target_urls)
+            for idx, url in enumerate(target_urls, 1):
+                # Progress logging
+                if plugin_context.logger:
+                    plugin_context.logger.info(f"[*] Scanning URL {idx}/{total_urls}: {url}")
+                else:
+                    logger.info(f"[*] Scanning URL {idx}/{total_urls}: {url}")
+
                 scan_result = csrf_scan(url, http_client=client, plugin_context=plugin_context)
                 findings.extend(scan_result)
 

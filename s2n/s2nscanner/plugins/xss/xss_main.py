@@ -66,6 +66,9 @@ class XSSScanner:
         if plugin_cfg and getattr(plugin_cfg, "custom_params", None):
             depth = int(plugin_cfg.custom_params.get("depth", depth))
 
+        # Logger setup
+        log = plugin_context.logger or logger
+
         # 스캐너 생성 및 실행
         try:
             scanner = self._build_scanner(http_client=http_client, depth=depth)
@@ -74,7 +77,7 @@ class XSSScanner:
 
         # 에러 발생 시 PluginError 반환
         except Exception as e:
-            logger.exception("[XSSScanner.run] plugin error: %s", e)
+            log.exception("[XSSScanner.run] plugin error: %s", e)
             return PluginError(
                 error_type=type(e).__name__,
                 message=str(e),
