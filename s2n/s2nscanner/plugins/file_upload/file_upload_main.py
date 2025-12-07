@@ -36,7 +36,7 @@ class FileUploadPlugin:
         # depth: config에서 가져오거나 기본값 2 사용
         self.depth = int(getattr(self.config, "depth", 2))
 
-    def run(self, plugin_context: PluginContext) -> PluginResult | PluginError:
+    def run(self, plugin_context: PluginContext) -> PluginResult:
         start_time = datetime.now()
         findings: List[Finding] = []
         stats = {"requests_sent": 0, "urls_scanned": 0}
@@ -108,24 +108,32 @@ class FileUploadPlugin:
                     log.warning("Error scanning URL %s: %s", url, e)
                     continue
 
-        except Exception as e:
-            log.exception("[!] Error during file upload testing: %s", e)
-            return PluginError(
-                error_type=type(e).__name__,
-                message=str(e),
-                traceback=str(e.__traceback__),
+            return PluginResult(
+                plugin_name=self.name,
+                status=PluginStatus.SUCCESS,
+                findings=findings,
+                start_time=start_time,
+                end_time=datetime.now(),
+                duration_seconds=(datetime.now() - start_time).total_seconds(),
+                urls_scanned=int(stats["urls_scanned"]),
+                requests_sent=stats["requests_sent"],
             )
 
-        return PluginResult(
-            plugin_name=self.name,
-            status=PluginStatus.SUCCESS,
-            findings=findings,
-            start_time=start_time,
-            end_time=datetime.now(),
-            duration_seconds=(datetime.now() - start_time).total_seconds(),
-            urls_scanned=int(stats["urls_scanned"]),
-            requests_sent=stats["requests_sent"],
-        )
+        except Exception as e:
+            log.exception("[!] Error during file upload testing: %s", e)
+            return PluginResult(
+                plugin_name=self.name,
+                status=PluginStatus.FAILED,
+                findings=findings,
+                start_time=start_time,
+                end_time=datetime.now(),
+                duration_seconds=(datetime.now() - start_time).total_seconds(),
+                error=PluginError(
+                    error_type=type(e).__name__,
+                    message=str(e),
+                    traceback=str(e.__traceback__),
+                ),
+            )
 
 
 def main(config: PluginContext | None = None):

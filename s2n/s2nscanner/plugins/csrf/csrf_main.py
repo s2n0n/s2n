@@ -31,7 +31,7 @@ class CSRFScanner:
         self.config = config or {}
 
     # CSRFScanner.run(플러그인_컨텍스트)로 플러그인을 실행합니다.
-    def run(self, plugin_context: PluginContext) -> PluginResult | PluginError:  # 【변경됨】
+    def run(self, plugin_context: PluginContext) -> PluginResult:
         start_time = datetime.now()
         findings: List[Finding] = []
         # 나중에 타입 확인 
@@ -53,24 +53,34 @@ class CSRFScanner:
                 scan_result = csrf_scan(url, http_client=client, plugin_context=plugin_context)
                 findings.extend(scan_result)
 
-        except Exception as e:
-            logger.exception("[CSRFScanner.run] plugin error: %s", e)
-            return PluginError(
-                error_type=type(e).__name__,
-                message=str(e),
-                traceback=str(e.__traceback__)
+            end_time = datetime.now()
+            return PluginResult(
+                plugin_name=self.name,
+                status=PluginStatus.PARTIAL if findings else PluginStatus.SUCCESS,
+                findings=findings,
+                start_time=start_time,
+                end_time=end_time,
+                duration_seconds=(end_time - start_time).total_seconds(),
+                urls_scanned=total_urls,
+                requests_sent=total_urls  # Approximation
             )
 
-        return PluginResult(
-            plugin_name=self.name,
-            status=PluginStatus.PARTIAL if findings else PluginStatus.SUCCESS,
-            findings=findings,
-            start_time=start_time,
-            end_time=datetime.now(),
-            duration_seconds=(datetime.now() - start_time).total_seconds(),
-            urls_scanned=1,
-            requests_sent=1
-        )
+        except Exception as e:
+            logger.exception("[CSRFScanner.run] plugin error: %s", e)
+            end_time = datetime.now()
+            return PluginResult(
+                plugin_name=self.name,
+                status=PluginStatus.FAILED,
+                findings=findings,
+                start_time=start_time,
+                end_time=end_time,
+                duration_seconds=(end_time - start_time).total_seconds(),
+                error=PluginError(
+                    error_type=type(e).__name__,
+                    message=str(e),
+                    traceback=str(e.__traceback__)
+                )
+            )
 
 
 # 메인 함수

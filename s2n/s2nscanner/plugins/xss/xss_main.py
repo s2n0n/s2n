@@ -51,7 +51,7 @@ class XSSScanner:
             )
         return ReflectedScanner(self.payload_path, http_client=http_client, depth=depth)
 
-    def run(self, plugin_context: PluginContext) -> PluginResult | PluginError:
+    def run(self, plugin_context: PluginContext) -> PluginResult:
         """Execute XSS scan and return results"""
         start_time = datetime.now()
         findings: List[Finding] = []
@@ -75,27 +75,36 @@ class XSSScanner:
             result = scanner.run(plugin_context)
             findings = getattr(result, "findings", [])
 
+            # 결과 래핑
+            end_time = datetime.now()
+            return PluginResult(
+                plugin_name=self.name,
+                status=PluginStatus.PARTIAL if findings else PluginStatus.SUCCESS,
+                findings=findings,
+                start_time=start_time,
+                end_time=end_time,
+                duration_seconds=(end_time - start_time).total_seconds(),
+                urls_scanned=getattr(result, "urls_scanned", len(target_urls)),
+                requests_sent=getattr(result, "requests_sent", 1),
+            )
+
         # 에러 발생 시 PluginError 반환
         except Exception as e:
             log.exception("[XSSScanner.run] plugin error: %s", e)
-            return PluginError(
-                error_type=type(e).__name__,
-                message=str(e),
-                traceback=str(e.__traceback__),
+            end_time = datetime.now()
+            return PluginResult(
+                plugin_name=self.name,
+                status=PluginStatus.FAILED,
+                findings=findings,
+                start_time=start_time,
+                end_time=end_time,
+                duration_seconds=(end_time - start_time).total_seconds(),
+                error=PluginError(
+                    error_type=type(e).__name__,
+                    message=str(e),
+                    traceback=str(e.__traceback__),
+                ),
             )
-
-        # 결과 래핑
-        end_time = datetime.now()
-        return PluginResult(
-            plugin_name=self.name,
-            status=PluginStatus.PARTIAL if findings else PluginStatus.SUCCESS,
-            findings=findings,
-            start_time=start_time,
-            end_time=end_time,
-            duration_seconds=(end_time - start_time).total_seconds(),
-            urls_scanned=getattr(result, "urls_scanned", len(target_urls)),
-            requests_sent=getattr(result, "requests_sent", 1),
-        )
 
 
 # 플러그인 팩토리 함수
