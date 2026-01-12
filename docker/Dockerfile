@@ -24,6 +24,11 @@ RUN python -m pip install --upgrade pip build setuptools wheel && \
 FROM python:3.11-slim
 WORKDIR /app
 
+# rich 라이브러리가 Docker에서 제대로 작동하도록 환경 변수 설정
+ENV PYTHONUNBUFFERED=1 \
+    TERM=xterm-256color \
+    FORCE_COLOR=1
+
 # 빌드 결과 복사 및 설치
 COPY --from=builder /dist /dist
 RUN pip install --no-cache-dir /dist/*.whl && \
