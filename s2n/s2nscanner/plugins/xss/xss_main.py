@@ -91,19 +91,10 @@ class XSSScanner:
         # 에러 발생 시 PluginError 반환
         except Exception as e:
             log.exception("[XSSScanner.run] plugin error: %s", e)
-            end_time = datetime.now()
-            return PluginResult(
-                plugin_name=self.name,
-                status=PluginStatus.FAILED,
-                findings=findings,
-                start_time=start_time,
-                end_time=end_time,
-                duration_seconds=(end_time - start_time).total_seconds(),
-                error=PluginError(
-                    error_type=type(e).__name__,
-                    message=str(e),
-                    traceback=str(e.__traceback__),
-                ),
+            return PluginError(
+                error_type=type(e).__name__,
+                message=str(e),
+                traceback=str(e.__traceback__),
             )
 
 

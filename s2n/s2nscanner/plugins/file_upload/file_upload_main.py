@@ -121,18 +121,10 @@ class FileUploadPlugin:
 
         except Exception as e:
             log.exception("[!] Error during file upload testing: %s", e)
-            return PluginResult(
-                plugin_name=self.name,
-                status=PluginStatus.FAILED,
-                findings=findings,
-                start_time=start_time,
-                end_time=datetime.now(),
-                duration_seconds=(datetime.now() - start_time).total_seconds(),
-                error=PluginError(
-                    error_type=type(e).__name__,
-                    message=str(e),
-                    traceback=str(e.__traceback__),
-                ),
+            return PluginError(
+                error_type=type(e).__name__,
+                message=str(e),
+                traceback=str(e.__traceback__),
             )
 
 
