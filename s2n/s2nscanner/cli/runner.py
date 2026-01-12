@@ -15,6 +15,7 @@ from s2n.s2nscanner.scan_engine import Scanner
 from s2n.s2nscanner.report import output_report, OutputFormat
 from s2n.s2nscanner.logger import init_logger
 
+import os
 from rich.console import Console
 from rich.table import Table
 from rich.progress import (
@@ -28,7 +29,11 @@ from rich.progress import (
 )
 from rich import box
 
-console = Console()
+# Docker/CI 환경에서도 rich가 작동하도록 설정
+# force_terminal=True: TTY가 없어도 터미널 기능 활성화
+# force_interactive=False: CI 환경에서 인터랙티브 기능 비활성화
+is_ci = os.getenv("CI", "").lower() in ("true", "1", "yes")
+console = Console(force_terminal=True, force_interactive=not is_ci)
 
 
 # CLI Root
