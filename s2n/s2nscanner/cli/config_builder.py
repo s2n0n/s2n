@@ -63,4 +63,5 @@ def build_scan_config(
         network_config=NetworkConfig(),
         output_config=output_cfg,
         logging_config=logging_cfg,
+        accept_risk=req.accept_risk,
     )
