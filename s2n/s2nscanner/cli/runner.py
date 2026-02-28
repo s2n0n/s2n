@@ -64,7 +64,7 @@ def cli():
     "-p",
     "--plugin",
     multiple=True,
-    help="Plugins to use (can be used multiple times). If omitted or if --all is used, all plugins except soft_brute_force will run. \n사용할 플러그인 이름. 생략하거나 --all 사용 시 전체 플러그인(soft_brute_force 제외)이 실행됩니다. \n\n[options: csrf, sqlinjection, file_upload, oscommand, xss, brute_force, soft_brute_force]",
+    help="Plugins to use (can be used multiple times). If omitted or if --all is used, all default plugins will run. \n사용할 플러그인 이름. 생략하거나 --all 사용 시 전체 플러그인이 실행됩니다. \n\n[options: csrf, sqlinjection, file_upload, oscommand, xss, brute_force, soft_brute_force]",
 )
 @click.option(
     "--all", "run_all", is_flag=True, help="Run all default plugins / 모든 기본 플러그인 실행"
@@ -112,7 +112,7 @@ def scan(
     # --all 플래그 처리 및 --plugin 생략 처리
     plugin_list = list(plugin)
     if run_all or not plugin_list:
-        plugin_list = ["csrf", "sqlinjection", "file_upload", "oscommand", "xss", "brute_force"]
+        plugin_list = ["csrf", "sqlinjection", "file_upload", "oscommand", "xss", "brute_force", "soft_brute_force"]
 
     # CLIArguments 구성
     args = CLIArguments(
