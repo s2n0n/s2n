@@ -40,11 +40,17 @@ class BruteForcePlugin:
         # depth: config에서 가져오거나 기본값 2 사용 (참고용, brute force는 crawler 미사용)
         self.depth = int(getattr(config, "depth", 2)) if config else 2
 
-    def _request_user_confirmation(self, logger) -> bool:
+    def _request_user_confirmation(self, plugin_context) -> bool:
         """
         사용자에게 무차별 대입 공격 실행 여부를 확인합니다.
         Y/N 외의 입력은 반복해서 재질문하여 오타 입력 시 바로 스킵되지 않도록 합니다.
         """
+        logger = plugin_context.logger
+        scan_config = plugin_context.scan_context.config
+        if getattr(scan_config, 'accept_risk', False):
+            logger.info("[--accept-risk] Flag activated. Automatically agreeing to the brute force attack warning. / [--accept-risk] 플래그가 활성화되어 무차별 대입 공격 경고에 자동으로 동의합니다.")
+            return True
+
         warning_message = (
             "\n\033[91m[WARNING]\033[0m This plugin performs an actual Brute Force attack.\n"
             "We are not responsible for any legal issues, server load, or account lockouts caused by this.\n"
@@ -83,7 +89,7 @@ class BruteForcePlugin:
         logger.info("--- 🛡️ Brute Force (무차별 대입) 탐지 스캐너 시작 ---")
 
         # 0. 사용자 동의 확인
-        if not self._request_user_confirmation(logger):
+        if not self._request_user_confirmation(plugin_context):
             logger.info("사용자가 스캔을 취소했습니다.")
             return PluginResult(
                 plugin_name=plugin_context.plugin_name,

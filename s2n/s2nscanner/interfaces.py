@@ -84,6 +84,7 @@ class ScanRequest:
     output_path: Optional[Path] = None
     verbose: bool = False
     depth: int = 2
+    accept_risk: bool = False
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,7 @@ class CLIArguments:
     depth: int = 2
     verbose: bool = False
     log_file: Optional[str] = None
+    accept_risk: bool = False
 
 
 # ============================================================================
@@ -186,6 +188,7 @@ class ScanConfig:
     network_config: NetworkConfig = field(default_factory=NetworkConfig)
     output_config: OutputConfig = field(default_factory=OutputConfig)
     logging_config: LoggingConfig = field(default_factory=LoggingConfig)
+    accept_risk: bool = False
 
 
 # ============================================================================

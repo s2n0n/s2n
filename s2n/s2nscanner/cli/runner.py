@@ -64,12 +64,18 @@ def cli():
     "-p",
     "--plugin",
     multiple=True,
-    help="Plugins to use (can be used multiple times) \n사용할 플러그인 이름 (복수 선택 가능)\n\n[options: csrf, sqlinjection, file_upload, oscommand, xss, brute_force, soft_brute_force]",
+    help="Plugins to use (can be used multiple times). If omitted or if --all is used, all default plugins will run. \n사용할 플러그인 이름. 생략하거나 --all 사용 시 전체 플러그인이 실행됩니다. \n\n[options: csrf, sqlinjection, file_upload, oscommand, xss, brute_force, soft_brute_force]",
+)
+@click.option(
+    "--all", "run_all", is_flag=True, help="Run all default plugins / 모든 기본 플러그인 실행"
 )
 @click.option(
     "-a",
     "--auth",
     help="Authentication type \n인증 타입 \n\n(NONE, BASIC, BEARER, DVWA, etc.)",
+)
+@click.option(
+    "-y", "--accept-risk", is_flag=True, help="Automatically bypass brute force warning / 무차별 대입 공격 경고 자동 동의"
 )
 @click.option("--username", help="Username for authentication \n인증용 사용자명")
 @click.option("--password", help="Password for authentication \n인증용 비밀번호")
@@ -89,6 +95,7 @@ def cli():
 def scan(
     url,
     plugin,
+    run_all,
     auth,
     username,
     password,
@@ -97,14 +104,20 @@ def scan(
     crawler_depth,
     verbose,
     log_file,
+    accept_risk,
 ):
     logger = init_logger(verbose, log_file)
     logger.info("Starting scan for %s", url)
 
+    # --all 플래그 처리 및 --plugin 생략 처리
+    plugin_list = list(plugin)
+    if run_all or not plugin_list:
+        plugin_list = ["csrf", "sqlinjection", "file_upload", "oscommand", "xss", "brute_force", "soft_brute_force"]
+
     # CLIArguments 구성
     args = CLIArguments(
         url=url,
-        plugin=list(plugin),
+        plugin=plugin_list,
         auth=auth,
         username=username,
         password=password,
@@ -113,6 +126,7 @@ def scan(
         depth=crawler_depth,
         verbose=verbose,
         log_file=log_file,
+        accept_risk=accept_risk,
     )
 
     request = cliargs_to_scanrequest(args)
