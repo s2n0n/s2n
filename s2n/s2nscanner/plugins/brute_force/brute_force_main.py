@@ -48,7 +48,7 @@ class BruteForcePlugin:
         logger = plugin_context.logger
         scan_config = plugin_context.scan_context.config
         if getattr(scan_config, 'accept_risk', False):
-            logger.info("[--accept-risk] 플래그가 활성화되어 무차별 대입 공격 경고에 자동으로 동의합니다.")
+            logger.info("[--accept-risk] Flag activated. Automatically agreeing to the brute force attack warning. / [--accept-risk] 플래그가 활성화되어 무차별 대입 공격 경고에 자동으로 동의합니다.")
             return True
 
         warning_message = (
