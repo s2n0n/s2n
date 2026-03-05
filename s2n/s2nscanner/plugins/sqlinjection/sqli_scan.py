@@ -56,25 +56,33 @@ def _load_sqli_payloads() -> Dict[str, List[str]]:
         elif isinstance(node, str):
             target.append(node)
 
-    # 에러/불린/유니온/스택 페이로드 수집
     payloads = data.get("payloads", {})
-    walk(payloads.get("error_based", {}), error_boolean)
-    walk(payloads.get("boolean_based", {}), error_boolean)
-    walk(payloads.get("union_based", {}), error_boolean)
-    walk(payloads.get("stacked_queries", {}), error_boolean)
 
-    # 시간 기반 페이로드 수집
-    walk(data.get("time_based", {}), time_based)
+    # 구조 통일: payloads.* 기준으로 읽되, 기존 top-level 구조도 호환
+    error_sections = (
+        "error_based",
+        "boolean_based",
+        "union_based",
+        "stacked_queries",
+        "filter_bypass",
+        "waf_bypass",
+        "korean_encoding_specific",
+    )
+    for section in error_sections:
+        walk(payloads.get(section, data.get(section, {})), error_boolean)
 
-    # 필터/WAF 우회 페이로드 수집
-    walk(data.get("filter_bypass", {}), error_boolean)
-    walk(data.get("waf_bypass", {}), error_boolean)
-    walk(data.get("korean_encoding_specific", {}), error_boolean)
+    walk(payloads.get("time_based", data.get("time_based", {})), time_based)
 
-    return {
+    loaded = {
         "error_boolean": [p for p in error_boolean if p],
         "time_based": [p for p in time_based if p],
     }
+    logger.info(
+        "[*] SQLi payloads loaded: error/boolean=%d, time_based=%d",
+        len(loaded["error_boolean"]),
+        len(loaded["time_based"]),
+    )
+    return loaded
 
 
 SQLI_PAYLOADS = _load_sqli_payloads()
@@ -155,77 +163,14 @@ def _scan_get_param(
     vulnerabilities = []
 
     for param in param_names:
-        found = False
-
-        # 1. Error/Boolean based detection (JSON 페이로드 반복)
-        for payload in SQLI_PAYLOADS["error_boolean"]:
-            attack_url = f"{base_url}?{param}={payload}"
-            try:
-                response = client.get(attack_url, timeout=5)
-            except Exception as e:
-                logger.debug(f"GET request error ({param}): {e}")
-                continue
-
-            success_indicator = check_for_success_indicator(response.text)
-            error_indicator = check_for_error_indicator(response.text)
-
-            if success_indicator:
-                vulnerabilities.append(
-                    _create_finding(
-                        "SQL Injection (Data Retrieval/Boolean)",
-                        Severity.HIGH,
-                        full_url,
-                        payload,
-                        "GET",
-                        param,
-                        f"성공 징후 '{success_indicator}' 발견",
-                    )
-                )
-                found = True
-                break
-
-            if error_indicator:
-                vulnerabilities.append(
-                    _create_finding(
-                        "SQL Injection (Error Based)",
-                        Severity.HIGH,
-                        full_url,
-                        payload,
-                        "GET",
-                        param,
-                        f"에러 키워드 '{error_indicator}' 발견",
-                    )
-                )
-                found = True
-                break
-
-        if found:
+        first_finding = _find_get_error_or_boolean(client, base_url, full_url, param)
+        if first_finding:
+            vulnerabilities.append(first_finding)
             continue
 
-        # 2. Time based blind detection (JSON 페이로드 반복)
-        for payload in SQLI_PAYLOADS["time_based"]:
-            attack_url = f"{base_url}?{param}={payload}"
-            try:
-                start_time = time.time()
-                client.get(attack_url, timeout=10)
-                elapsed_time = time.time() - start_time
-
-                if elapsed_time > TIME_THRESHOLD:
-                    vulnerabilities.append(
-                        _create_finding(
-                            "SQL Injection (Time Based)",
-                            Severity.MEDIUM,
-                            full_url,
-                            payload,
-                            "GET",
-                            param,
-                            f"응답 시간 {elapsed_time:.2f}초 초과",
-                        )
-                    )
-                    break
-            except Exception as e:
-                logger.debug(f"GET (Time Blind) request error ({param}): {e}")
-                pass
+        time_finding = _find_get_time_based(client, base_url, full_url, param)
+        if time_finding:
+            vulnerabilities.append(time_finding)
 
     return vulnerabilities
 
@@ -251,103 +196,193 @@ def _scan_forms(client: HttpClient, url: str) -> List[Finding]:
             continue
 
         for param in param_names:
-            found = False
-
-            # 1. Error/Boolean based detection (JSON 페이로드 반복)
-            for payload in SQLI_PAYLOADS["error_boolean"]:
-                test_data = {
-                    p: payload if p == param else "1" for p in param_names
-                }
-
-                try:
-                    if method == "POST":
-                        res = client.post(
-                            form_url, data=test_data, timeout=5, allow_redirects=True
-                        )
-                    else:
-                        res = client.get(
-                            form_url,
-                            params=test_data,
-                            timeout=5,
-                            allow_redirects=True,
-                        )
-                except Exception as e:
-                    logger.debug(f"Form request error ({method}/{param}): {e}")
-                    continue
-
-                success_indicator = check_for_success_indicator(res.text)
-                error_indicator = check_for_error_indicator(res.text)
-
-                if success_indicator:
-                    vulnerabilities.append(
-                        _create_finding(
-                            "SQL Injection (Data Retrieval/Boolean)",
-                            Severity.HIGH,
-                            form_url,
-                            payload,
-                            method,
-                            param,
-                            f"성공 징후 '{success_indicator}' 발견",
-                        )
-                    )
-                    found = True
-                    break
-
-                if error_indicator:
-                    vulnerabilities.append(
-                        _create_finding(
-                            "SQL Injection (Error Based)",
-                            Severity.HIGH,
-                            form_url,
-                            payload,
-                            method,
-                            param,
-                            f"에러 키워드 '{error_indicator}' 발견",
-                        )
-                    )
-                    found = True
-                    break
-
-            if found:
+            first_finding = _find_form_error_or_boolean(
+                client,
+                form_url,
+                method,
+                param_names,
+                param,
+            )
+            if first_finding:
+                vulnerabilities.append(first_finding)
                 continue
 
-            # 2. Time based blind detection (JSON 페이로드 반복)
-            for payload in SQLI_PAYLOADS["time_based"]:
-                test_data_time = {
-                    p: payload if p == param else "1"
-                    for p in param_names
-                }
-                try:
-                    start_time = time.time()
-                    if method == "POST":
-                        client.post(
-                            form_url, data=test_data_time, timeout=10, allow_redirects=True
-                        )
-                    else:
-                        client.get(
-                            form_url,
-                            params=test_data_time,
-                            timeout=10,
-                            allow_redirects=True,
-                        )
-
-                    elapsed_time = time.time() - start_time
-
-                    if elapsed_time > TIME_THRESHOLD:
-                        vulnerabilities.append(
-                            _create_finding(
-                                "SQL Injection (Time Based)",
-                                Severity.MEDIUM,
-                                form_url,
-                                payload,
-                                method,
-                                param,
-                                f"응답 시간 {elapsed_time:.2f}초 초과",
-                            )
-                        )
-                        break
-                except Exception as e:
-                    logger.debug(f"Form (Time Blind) request error ({method}/{param}): {e}")
-                    pass
+            time_finding = _find_form_time_based(
+                client,
+                form_url,
+                method,
+                param_names,
+                param,
+            )
+            if time_finding:
+                vulnerabilities.append(time_finding)
 
     return vulnerabilities
+
+
+def _find_get_error_or_boolean(
+    client: HttpClient,
+    base_url: str,
+    full_url: str,
+    param: str,
+) -> Optional[Finding]:
+    for payload in SQLI_PAYLOADS["error_boolean"]:
+        attack_url = f"{base_url}?{param}={payload}"
+        try:
+            response = client.get(attack_url, timeout=5)
+        except Exception as e:
+            logger.debug(f"GET request error ({param}): {e}")
+            continue
+
+        success_indicator = check_for_success_indicator(response.text)
+        if success_indicator:
+            return _create_finding(
+                "SQL Injection (Data Retrieval/Boolean)",
+                Severity.HIGH,
+                full_url,
+                payload,
+                "GET",
+                param,
+                f"성공 징후 '{success_indicator}' 발견",
+            )
+
+        error_indicator = check_for_error_indicator(response.text)
+        if error_indicator:
+            return _create_finding(
+                "SQL Injection (Error Based)",
+                Severity.HIGH,
+                full_url,
+                payload,
+                "GET",
+                param,
+                f"에러 키워드 '{error_indicator}' 발견",
+            )
+
+    return None
+
+
+def _find_get_time_based(
+    client: HttpClient,
+    base_url: str,
+    full_url: str,
+    param: str,
+) -> Optional[Finding]:
+    for payload in SQLI_PAYLOADS["time_based"]:
+        attack_url = f"{base_url}?{param}={payload}"
+        try:
+            start_time = time.time()
+            client.get(attack_url, timeout=10)
+            elapsed_time = time.time() - start_time
+        except Exception as e:
+            logger.debug(f"GET (Time Blind) request error ({param}): {e}")
+            continue
+
+        if elapsed_time > TIME_THRESHOLD:
+            return _create_finding(
+                "SQL Injection (Time Based)",
+                Severity.MEDIUM,
+                full_url,
+                payload,
+                "GET",
+                param,
+                f"응답 시간 {elapsed_time:.2f}초 초과",
+            )
+
+    return None
+
+
+def _send_form_request(
+    client: HttpClient,
+    method: str,
+    form_url: str,
+    form_data: Dict[str, str],
+    timeout: int,
+):
+    if method == "POST":
+        return client.post(
+            form_url,
+            data=form_data,
+            timeout=timeout,
+            allow_redirects=True,
+        )
+
+    return client.get(
+        form_url,
+        params=form_data,
+        timeout=timeout,
+        allow_redirects=True,
+    )
+
+
+def _find_form_error_or_boolean(
+    client: HttpClient,
+    form_url: str,
+    method: str,
+    param_names: List[str],
+    param: str,
+) -> Optional[Finding]:
+    for payload in SQLI_PAYLOADS["error_boolean"]:
+        test_data = {p: payload if p == param else "1" for p in param_names}
+
+        try:
+            response = _send_form_request(client, method, form_url, test_data, timeout=5)
+        except Exception as e:
+            logger.debug(f"Form request error ({method}/{param}): {e}")
+            continue
+
+        success_indicator = check_for_success_indicator(response.text)
+        if success_indicator:
+            return _create_finding(
+                "SQL Injection (Data Retrieval/Boolean)",
+                Severity.HIGH,
+                form_url,
+                payload,
+                method,
+                param,
+                f"성공 징후 '{success_indicator}' 발견",
+            )
+
+        error_indicator = check_for_error_indicator(response.text)
+        if error_indicator:
+            return _create_finding(
+                "SQL Injection (Error Based)",
+                Severity.HIGH,
+                form_url,
+                payload,
+                method,
+                param,
+                f"에러 키워드 '{error_indicator}' 발견",
+            )
+
+    return None
+
+
+def _find_form_time_based(
+    client: HttpClient,
+    form_url: str,
+    method: str,
+    param_names: List[str],
+    param: str,
+) -> Optional[Finding]:
+    for payload in SQLI_PAYLOADS["time_based"]:
+        test_data = {p: payload if p == param else "1" for p in param_names}
+        try:
+            start_time = time.time()
+            _send_form_request(client, method, form_url, test_data, timeout=10)
+            elapsed_time = time.time() - start_time
+        except Exception as e:
+            logger.debug(f"Form (Time Blind) request error ({method}/{param}): {e}")
+            continue
+
+        if elapsed_time > TIME_THRESHOLD:
+            return _create_finding(
+                "SQL Injection (Time Based)",
+                Severity.MEDIUM,
+                form_url,
+                payload,
+                method,
+                param,
+                f"응답 시간 {elapsed_time:.2f}초 초과",
+            )
+
+    return None
