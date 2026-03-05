@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 # 패키지 실행과 직접 실행을 모두 지원하기 위한 import 처리
 from s2n.s2nscanner.interfaces import (
@@ -27,7 +27,7 @@ class CSRFScanner:
     description = "CSRF scanner plugin from s2n.s2nscanner"
 
     #  CSRF Plugin의 설정 파라미터입니다.
-    def __init__(self, config: PluginConfig | None = None):
+    def __init__(self, config: Optional[PluginConfig] = None):
         self.config = config or {}
 
     # CSRFScanner.run(플러그인_컨텍스트)로 플러그인을 실행합니다.
@@ -84,7 +84,7 @@ class CSRFScanner:
 
 
 # 메인 함수
-def main(config: None | PluginConfig = None):
+def main(config: Optional[PluginConfig] = None):
     return CSRFScanner(config)
 
 
