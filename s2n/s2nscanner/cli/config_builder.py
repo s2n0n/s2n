@@ -7,6 +7,7 @@ from s2n.s2nscanner.interfaces import (
     NetworkConfig,
     OutputConfig,
     LoggingConfig,
+    LogLevel,
     AuthConfig,
     AuthType,
     PluginConfig,
@@ -44,7 +45,7 @@ def build_scan_config(
 
     # 로깅 설정 구성
     logging_cfg = LoggingConfig(
-        level=("DEBUG" if req.verbose else "INFO"),
+        level=(LogLevel.DEBUG if req.verbose else LogLevel.INFO),
         console_output=True,
     )
 
