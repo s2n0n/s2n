@@ -553,15 +553,20 @@ def test_xss_plugin_no_http_client_error(payload_path):
 
     result = plugin.run(plugin_context)
 
-    # http_client가 None이면 PluginError가 반환되어야 함
-    assert isinstance(result, PluginError), (
-        f"Expected PluginError, got {type(result).__name__}"
+    # http_client가 None이면 PluginResult 반환, status는 FAILED이어야 함
+    from s2n.s2nscanner.interfaces import PluginResult, PluginStatus
+    
+    assert isinstance(result, PluginResult), (
+        f"Expected PluginResult, got {type(result).__name__}"
     )
-    assert result.error_type == "ValueError", (
-        f"Expected ValueError, got {result.error_type}"
+    assert result.status == PluginStatus.FAILED, "Expected FAILED status"
+    assert result.error is not None, "Expected error to be set"
+    
+    assert result.error.error_type == "ValueError", (
+        f"Expected ValueError, got {result.error.error_type}"
     )
-    assert "http_client" in result.message.lower(), (
-        f"Error message should mention http_client: {result.message}"
+    assert "http_client" in result.error.message.lower(), (
+        f"Error message should mention http_client: {result.error.message}"
     )
 
 
