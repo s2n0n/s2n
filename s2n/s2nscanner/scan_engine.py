@@ -472,7 +472,7 @@ class Scanner:
                 self.logger.info(f"✅ {plugin_name}.post_scan() completed")
 
                 if not isinstance(final_result, PluginResult):
-                    raise TypeError("post_scan() must return a PluginResult instance, got {type(final_result).__name__}")
+                    raise TypeError(f"post_scan() must return a PluginResult instance, got {type(final_result).__name__}")
                 
                 raw_result = final_result
             
@@ -496,7 +496,7 @@ class Scanner:
                 self.logger.warning(f"⚠️ Plugin '{plugin_name}' has no run() or post_scan() method. Skipping.")
                 return self._build_skipped_result(plugin_name, "no run() or post_scan() method")
             
-            err = PluginError(error_type="PluginContractError", message="plugin returned None", timestamp=datetime.utcnow)
+            err = PluginError(error_type="PluginContractError", message="plugin returned None", timestamp=datetime.utcnow())
             return self._plugin_failure_result(plugin_name, err, start_time)
         
 
