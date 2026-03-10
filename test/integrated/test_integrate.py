@@ -289,7 +289,7 @@ def test_header_values_with_different_policies():
                 "X-Frame-Options": "DENY",
                 "Content-Security-Policy": "",  # 빈 값
             },
-            "expected": Severity.INFO,  # 헤더가 존재하고 빈 값은 문제 없음
+            "expected": Severity.MEDIUM,  # 빈 값은 보호를 제공하지 않으므로 누락된 것으로 간주됨
         },
     ]
 
