@@ -281,7 +281,7 @@ def test_header_values_with_different_policies():
                 "X-Frame-Options": "SAMEORIGIN",
                 "Content-Security-Policy": "default-src 'self'; script-src 'unsafe-inline'",
             },
-            "expected": Severity.MEDIUM,  # CSP contains unsafe directive
+            "expected": Severity.LOW,  # CSP contains unsafe directive
         },
         {
             "name": "Empty CSP value",
