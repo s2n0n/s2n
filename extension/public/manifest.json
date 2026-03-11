@@ -5,7 +5,8 @@
     "description": "S2N 취약점 스캐너 Chrome Extension GUI",
     "permissions": [
         "nativeMessaging",
-        "storage"
+        "storage",
+        "tabs"
     ],
     "action": {
         "default_popup": "popup.html",

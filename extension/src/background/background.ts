@@ -9,6 +9,7 @@
 import { sendNativeMessage, connectNative, disconnectNative } from '@/lib/nativeMessaging'
 import { INITIAL_SCAN_STATE } from '@/types/scan'
 import type { ScanState, Finding, ProgressInfo, ScanSummary } from '@/types/scan'
+import { saveScanHistory } from '@/lib/storage'
 
 // ============================================================================
 // 전역 상태 (Global State)
@@ -75,6 +76,19 @@ function handleNativeMessage(response: any) {
             broadcastStateUpdate()
             disconnectNative(nativePort)
             nativePort = null
+
+            // 히스토리에 자동 저장
+            const historyItem = {
+                scanId: `scan_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                targetUrl: currentScanState.targetUrl,
+                timestamp: new Date().toISOString(),
+                status: currentScanState.status,
+                summary: currentScanState.summary!,
+                findings: currentScanState.findings
+            }
+            saveScanHistory(historyItem).catch((err) => {
+                console.error('[Background] Failed to save scan history:', err)
+            })
             break
 
         case 'scan_failed':

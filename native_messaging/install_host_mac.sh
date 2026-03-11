@@ -70,8 +70,28 @@ fi
 mkdir -p "$TARGET_DIR"
 echo -e "${GREEN}✅ 매니페스트 디렉토리 확인: $TARGET_DIR${NC}"
 
+# ----- 동적 래퍼(Launcher) 스크립트 생성 -----
+LAUNCHER_PATH="$TARGET_DIR/${HOST_NAME}_launcher.sh"
+cat <<EOF > "$LAUNCHER_PATH"
+#!/bin/bash
+# S2N Native Messaging Host Launcher (기기에 맞게 자동 생성됨)
+
+SCRIPT_DIR="$PROJECT_ROOT"
+export PYTHONPATH="\$SCRIPT_DIR:\$SCRIPT_DIR/s2n:\$PYTHONPATH"
+
+if [ -f "\$SCRIPT_DIR/.venv/bin/python3" ]; then
+    PYTHON_EXE="\$SCRIPT_DIR/.venv/bin/python3"
+else
+    PYTHON_EXE="/usr/bin/python3"
+fi
+
+exec "\$PYTHON_EXE" "\$SCRIPT_DIR/native_host.py" "\$@"
+EOF
+chmod +x "$LAUNCHER_PATH"
+echo -e "${GREEN}✅ 동적 래퍼 생성 완료: $LAUNCHER_PATH${NC}"
+
 # ----- 매니페스트 생성 (플레이스홀더 치환) -----
-sed -e "s|__NATIVE_HOST_PATH__|$NATIVE_HOST_PATH|g" \
+sed -e "s|__NATIVE_HOST_PATH__|$LAUNCHER_PATH|g" \
     -e "s|__EXTENSION_ID__|$EXTENSION_ID|g" \
     "$MANIFEST_TEMPLATE" > "$TARGET_MANIFEST"
 

@@ -14,6 +14,22 @@ stdin/stdout으로 통신합니다.
 import json
 import struct
 import sys
+import os
+
+# Chrome Native Messaging 실행 시PYTHONPATH가 설정되지 않으므로,
+# 스크립트 위치 기준으로 상위 디렉토리를 sys.path에 추가하고 워킹 디렉토리로 고정합니다.
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR) # /Users/yooju/Desktop/s2n
+S2N_DIR = os.path.join(CURRENT_DIR, "s2n") # /Users/yooju/Desktop/s2n/s2n
+
+# Chrome에서 실행 시 로컬 파일(plugins 등)을 읽기 위해 워킹 디렉토리 강제 고정
+os.chdir(CURRENT_DIR)
+
+if CURRENT_DIR not in sys.path:
+    sys.path.insert(0, CURRENT_DIR)
+if S2N_DIR not in sys.path:
+    sys.path.insert(1, S2N_DIR)
+
 import threading
 import traceback
 from typing import Any, Dict, Optional, List
@@ -121,16 +137,25 @@ def decode_message(data: bytes) -> Dict[str, Any]:
     return json.loads(json_data.decode('utf-8'))
 
 
+import traceback
+import logging
+
 # ============================================================================
-# 로깅 (stderr → Chrome이 무시, 디버그용)
+# 로깅 (Chrome이 stderr를 삼키므로 파일로 기록)
 # ============================================================================
+logging.basicConfig(
+    filename='/tmp/s2n_native_host.log',
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)s] %(message)s'
+)
 
 def log_info(msg: str) -> None:
+    logging.info(msg)
     sys.stderr.write(f"[S2N-Host INFO] {msg}\n")
     sys.stderr.flush()
 
-
 def log_error(msg: str) -> None:
+    logging.error(msg)
     sys.stderr.write(f"[S2N-Host ERROR] {msg}\n")
     sys.stderr.flush()
 
