@@ -180,17 +180,19 @@ def test_run_skips_login_page(plugin, plugin_context, mock_http_client):
 @pytest.mark.unit
 def test_run_handles_http_error(plugin, plugin_context, mock_http_client):
     """Test that the plugin gracefully fails when HTTP error occurs"""
-    from s2n.s2nscanner.interfaces import PluginError
+    from s2n.s2nscanner.interfaces import PluginResult, PluginStatus
 
     mock_http_client.get.side_effect = Exception("연결 시간 초과")
 
     # Execute
     result = plugin.run(plugin_context)
 
-    # Assert - plugin returns PluginError, not PluginResult with FAILED status
-    assert isinstance(result, PluginError)
-    assert result.error_type == "Exception"
-    assert result.message == "연결 시간 초과"
+    # Assert - plugin returns PluginResult with FAILED status
+    assert isinstance(result, PluginResult)
+    assert result.status == PluginStatus.FAILED
+    assert result.error is not None
+    assert result.error.error_type == "Exception"
+    assert result.error.message == "연결 시간 초과"
 
 
 @pytest.mark.unit

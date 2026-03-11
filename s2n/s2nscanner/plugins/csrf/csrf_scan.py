@@ -1,3 +1,4 @@
+import re
 import uuid
 from typing import List, Optional, Any
 
@@ -9,18 +10,19 @@ from s2n.s2nscanner.interfaces import (
     Severity,
     Confidence,
 )
-from s2n.s2nscanner.plugins.csrf.csrf_constants import CSRF_TOKEN_KEYWORDS, USER_AGENT
-from s2n.s2nscanner.plugins.csrf.csrf_utils import FormParser
+from s2n.s2nscanner.plugins.csrf.csrf_constants import (
+    CSRF_TOKEN_KEYWORDS,
+    META_CSRF_NAMES,
+    JS_TOKEN_PATTERN,
+    SAMESITE_SECURE_VALUES,
+    DEFAULT_TIMEOUT,
+    USER_AGENT,
+)
+from s2n.s2nscanner.plugins.csrf.csrf_utils import FormParser, MetaTokenParser
 from s2n.s2nscanner.logger import get_logger
 
 
 logger = get_logger("plugins.csrf")
-
-
-# TODO:
-# - CSRF Keyword CVE 등 참조하여 키워드 목록 보강 (+ 동적으로 로드하는 기능 고려)
-# - 3가지 취약점 스캔 병렬 처리 (동시 수행)
-# - http_res_headers 검증 로직 강화: 헤더 필드 뿐만 아니라 값 검증 추가 (예: X-Frame-Options: DENY or SAMEORIGIN 등)
 
 
 def csrf_scan(
@@ -29,19 +31,22 @@ def csrf_scan(
     plugin_context: Optional[PluginContext] = None,
 ) -> List[Finding]:
     """
-    지정된 URL에 대해 CSRF 취약점 검사를 수행합니다.
-    실제 공격을 하지 않으며, CSRF 토큰 존재 여부 등만 점검합니다.
-    Returns:
-        List[Finding]: 발견된 취약점(없으면 빈 리스트)
+    Multi-layer CSRF vulnerability scan (L1-L8).
+
+    L1: Form token keyword presence
+    L2: Token uniqueness (two GETs, compare values)
+    L3: SameSite cookie + security header validation
+    L4: Origin header validation (safe GET-only)
+    L5: <meta> tag CSRF token scanning
+    L6: <script> global JS variable CSRF token scanning
+    L7: API custom header (X-Requested-With) requirement check
+    L8: CORS misconfiguration analysis (integrated with L4)
+
+    No state-changing requests are sent.
     """
     results: List[Finding] = []
-
-    # 로거 설정
     context_logger = getattr(plugin_context, "logger", None) or logger
 
-    # HTTP 클라이언트 준비
-
-    # 세션 및 헤더 설정
     session = getattr(http_client, "s", None)
     if session is None:
         context_logger.error(
@@ -52,329 +57,358 @@ def csrf_scan(
         session.headers.update({"User-Agent": USER_AGENT})
 
     try:
-        # GET 요청으로 폼 페이지 획득
-        resp = session.get(target_url, timeout=10)
-        # HTTP Response 메시지를 검증해야함
-        # + HTTP 헤더에서 CSRF 필드를 확인해야함
-        # + Form 태그가 왜 들어가야함?
-        # Form 태그 검증 자체로직이 분리되어야함. (클라이언트 / 서버 사이드 양측 검증이 필요함)
-        # + 클라이언트에서 쿠키 탈취에 취약할 수 있는 코드 패턴 등 검사해야함.
-        html = resp.text
-        # CSRF 토큰 키워드가 HTML에 존재하는지 확인
-        # scan_html로 response html text 검사 (주요 "csrf", "token" 키워드를 검색함)
-        html_result = scan_html(html, resp, target_url)
-        http_result = scan_res_headers(resp.headers)
-        html_form_result = scan_form_tags(html, resp, target_url)
-        results.extend([html_result, http_result, html_form_result])
-        # Form 태그 등에서 CSRF 토큰 미존재 취약점 발견 시 결과 추가
+        # Two GETs for token uniqueness comparison (L2, L5, L6)
+        resp1 = session.get(target_url, timeout=DEFAULT_TIMEOUT)
+        resp2 = session.get(target_url, timeout=DEFAULT_TIMEOUT)
+        html1 = resp1.text
+        html2 = resp2.text
 
-        # Response Header 검사
+        # L3: Header + SameSite cookie validation
+        results.extend(scan_res_headers(resp1.headers, target_url))
+        # L1 + L2: Form token presence + uniqueness
+        results.extend(scan_form_tags(html1, html2, resp1, target_url))
+        # L4 + L8: Origin validation + CORS misconfiguration
+        results.extend(scan_origin_validation(session, target_url))
+        # L5: Meta tag token scanning
+        results.extend(scan_meta_tokens(html1, html2, target_url))
+        # L6: JS global variable token scanning
+        results.extend(scan_js_tokens(html1, html2, target_url))
+        # L7: API custom header requirement
+        results.extend(scan_custom_header_requirement(session, target_url))
 
     except Exception as e:
-        context_logger.error(f"[csrf_scan] Error scanning {target_url}: {e}")
-        return results
+        context_logger.error("[csrf_scan] Error scanning %s: %s", target_url, e)
 
     return results
 
 
-# HTML 텍스트에서 CSRF 토큰 존재 여부 검사
-# TODO: CSRF HTTP Request/Response 헤더 검사 로직 추가 필요
-# TODO: 정적 검사 추가
-def scan_html(
-    html: str,
-    resp: Any,
-    target_url: str,
-) -> Finding:
+# ---------------------------------------------------------------------------
+# L3: Response header + SameSite cookie validation
+# ---------------------------------------------------------------------------
+
+def scan_res_headers(headers: dict, target_url: str = "N/A") -> List[Finding]:
     """
-    주어진 HTML에서 CSRF 취약점을 검사합니다.
-    CSRF 토큰이 발견되지 않으면 Finding 객체를 반환합니다.
+    Validate CSRF-related response headers:
+    - X-Frame-Options value (DENY / SAMEORIGIN)
+    - Content-Security-Policy presence and safety
+    - Set-Cookie SameSite attribute value
     """
-    # 모든 키워드 병렬(동시에) 검색: 하나라도 있으면 token_found = True
-    html_lower = html.lower()
-    token_found = any(keyword.lower() in html_lower for keyword in CSRF_TOKEN_KEYWORDS)
+    findings: List[Finding] = []
 
-    if not token_found:
-        # 취약점 발견: CSRF 토큰 미존재
-        return Finding(
-            id=str(uuid.uuid4()),
-            plugin="csrf",
-            severity=Severity.HIGH,
-            title="CSRF Token Not Found",
-            description="No CSRF token detected in form or page. This may expose the site to CSRF attacks.",
-            url=target_url,
-            parameter=None,
-            method="GET",
-            payload=None,
-            evidence="No CSRF token keyword found in response HTML.",
-            request=HTTPRequest(
-                method="GET",
-                url=target_url,
-                headers=dict(resp.request.headers),
-                body=None,
-                cookies=dict(resp.request._cookies)
-                if hasattr(resp.request, "_cookies")
-                else {},
-            ),
-            response=None,
-            remediation="Implement anti-CSRF tokens in all forms that perform state-changing actions.",
-            references=[
-                "https://owasp.org/www-community/attacks/csrf",
-                "https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html",
-            ],
-            cwe_id="CWE-352",
-            cvss_score=6.8,
-            cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N",
-            confidence=Confidence.FIRM,
-        )
+    # --- X-Frame-Options ---
+    xfo = headers.get("X-Frame-Options", "")
+    if not xfo:
+        findings.append(_make_header_finding(
+            target_url,
+            Severity.MEDIUM,
+            "Missing X-Frame-Options Header",
+            "The X-Frame-Options header is absent, making the page susceptible to clickjacking.",
+            "Missing: X-Frame-Options",
+            Confidence.FIRM,
+        ))
+    elif xfo.upper() not in ("DENY", "SAMEORIGIN"):
+        findings.append(_make_header_finding(
+            target_url,
+            Severity.LOW,
+            "Weak X-Frame-Options Value",
+            f"X-Frame-Options is set to '{xfo}', which may not provide adequate protection.",
+            f"X-Frame-Options: {xfo}",
+            Confidence.TENTATIVE,
+        ))
 
-    # 토큰이 있으면 취약점 X informational finding (선택)
-    return Finding(
-        id=str(uuid.uuid4()),
-        plugin="csrf",
-        severity=Severity.INFO,
-        title="CSRF Token Detected",
-        description="CSRF token detected in form or page.",
-        url=target_url,
-        parameter=None,
-        method="GET",
-        payload=None,
-        evidence="CSRF token keyword found in response HTML.",
-        request=HTTPRequest(
-            method="GET",
-            url=target_url,
-            headers=dict(resp.request.headers),
-            body=None,
-            cookies=dict(resp.request._cookies)
-            if hasattr(resp.request, "_cookies")
-            else {},
-        ),
-        response=None,
-        remediation=None,
-        references=["https://owasp.org/www-community/attacks/csrf"],
-        cwe_id=None,
-        cvss_score=None,
-        cvss_vector=None,
-        confidence=Confidence.TENTATIVE,
-    )
-
-
-def scan_res_headers(headers: dict) -> Finding:
-    """
-    HTTP 응답 헤더에서 CSRF 관련 보안 헤더를 검사합니다.
-    CSRF 보호 헤더가 없으면 Finding 객체를 반환합니다.
-    """
-    headings_to_check = ["X-Frame-Options", "Content-Security-Policy"]
-    issues = []
-
-    # 기본 헤더 누락 검사
-    missing_headings = [h for h in headings_to_check if h not in headers]
-    if missing_headings:
-        issues.append(f"Missing headers: {', '.join(missing_headings)}")
-
-    # Set-Cookie 헤더에서 SameSite 쿠키 검사
-    set_cookie = headers.get("Set-Cookie", "")
-    if set_cookie and "samesite" not in set_cookie.lower():
-        issues.append("Set-Cookie without SameSite attribute")
-
-    # CSP 헤더 와일드카드 검사
+    # --- Content-Security-Policy ---
     csp = headers.get("Content-Security-Policy", "")
-    if csp and ("*" in csp or "'unsafe-inline'" in csp or "'unsafe-eval'" in csp):
-        issues.append("CSP contains wildcard or unsafe directives")
+    if not csp:
+        findings.append(_make_header_finding(
+            target_url,
+            Severity.MEDIUM,
+            "Missing Content-Security-Policy Header",
+            "No CSP header found. A proper CSP helps mitigate XSS and data injection attacks.",
+            "Missing: Content-Security-Policy",
+            Confidence.FIRM,
+        ))
+    elif "*" in csp or "'unsafe-inline'" in csp or "'unsafe-eval'" in csp:
+        findings.append(_make_header_finding(
+            target_url,
+            Severity.LOW,
+            "Weak Content-Security-Policy Directives",
+            "CSP contains wildcard or unsafe directives that weaken its protection.",
+            f"CSP: {csp[:200]}",
+            Confidence.FIRM,
+        ))
 
-    if issues:
-        return Finding(
-            id=str(uuid.uuid4()),
-            plugin="csrf",
-            severity=Severity.MEDIUM,
-            title="CSRF Protection Headers Issues",
-            description=f"Security issues detected in CSRF protection headers: {'; '.join(issues)}.",
-            url="N/A",
-            parameter=None,
-            method=None,
-            payload=None,
-            evidence="; ".join(issues),
-            request=None,
-            response=None,
-            remediation="Implement appropriate CSRF protection headers such as X-Frame-Options, Content-Security-Policy, and SameSite cookies.",
-            references=[
-                "https://owasp.org/www-community/controls/Clickjacking_Defense_Cheat_Sheet",
-                "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy",
-                "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie/SameSite",
-            ],
-            cwe_id="CWE-352",
-            cvss_score=5.0,
-            cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N",
-            confidence=Confidence.FIRM,
-        )
+    # --- Set-Cookie SameSite ---
+    set_cookie = headers.get("Set-Cookie", "")
+    if set_cookie:
+        findings.extend(_check_samesite_cookies(set_cookie, target_url))
 
+    # If nothing was found, emit an INFO finding
+    if not findings:
+        findings.append(_make_header_finding(
+            target_url,
+            Severity.INFO,
+            "CSRF Protection Headers Adequate",
+            "Response headers include appropriate CSRF-related protections.",
+            "All checked headers present with acceptable values.",
+            Confidence.TENTATIVE,
+        ))
+
+    return findings
+
+
+def _check_samesite_cookies(set_cookie_header: str, target_url: str) -> List[Finding]:
+    """Parse Set-Cookie header(s) and validate SameSite values."""
+    findings: List[Finding] = []
+    cookies = set_cookie_header.split(",") if "," in set_cookie_header else [set_cookie_header]
+
+    for cookie in cookies:
+        cookie_lower = cookie.lower().strip()
+        if not cookie_lower:
+            continue
+
+        cookie_name = cookie.strip().split("=")[0].strip() if "=" in cookie else "unknown"
+
+        if "samesite" not in cookie_lower:
+            findings.append(_make_header_finding(
+                target_url,
+                Severity.MEDIUM,
+                f"Cookie '{cookie_name}' Missing SameSite Attribute",
+                f"The cookie '{cookie_name}' does not set a SameSite attribute, "
+                "making it vulnerable to cross-site request attachment.",
+                f"Set-Cookie: {cookie.strip()[:200]}",
+                Confidence.FIRM,
+            ))
+        else:
+            samesite_value = _extract_samesite_value(cookie_lower)
+            if samesite_value and samesite_value not in SAMESITE_SECURE_VALUES:
+                findings.append(_make_header_finding(
+                    target_url,
+                    Severity.HIGH,
+                    f"Cookie '{cookie_name}' Has SameSite=None",
+                    f"SameSite=None on '{cookie_name}' means the cookie is sent on "
+                    "cross-origin requests, offering no CSRF protection from this mechanism.",
+                    f"SameSite={samesite_value}",
+                    Confidence.CERTAIN,
+                ))
+
+    return findings
+
+
+def _extract_samesite_value(cookie_lower: str) -> str:
+    """Extract the SameSite value from a lowercased cookie string."""
+    for part in cookie_lower.split(";"):
+        part = part.strip()
+        if part.startswith("samesite"):
+            if "=" in part:
+                return part.split("=", 1)[1].strip()
+    return ""
+
+
+def _make_header_finding(
+    url: str,
+    severity: Severity,
+    title: str,
+    description: str,
+    evidence: str,
+    confidence: Confidence,
+) -> Finding:
+    """Helper to build a header-related Finding."""
     return Finding(
         id=str(uuid.uuid4()),
         plugin="csrf",
-        severity=Severity.INFO,
-        title="All CSRF Protection Headers Present",
-        description="All recommended CSRF protection headers are present in the response.",
-        url="N/A",
-        parameter=None,
-        method=None,
-        payload=None,
-        evidence="All CSRF protection headers found.",
+        severity=severity,
+        title=title,
+        description=description,
+        url=url,
+        evidence=evidence,
         request=None,
         response=None,
-        remediation=None,
+        remediation=(
+            "Configure appropriate security headers: "
+            "X-Frame-Options (DENY or SAMEORIGIN), CSP without unsafe directives, "
+            "and SameSite=Strict or Lax on session cookies."
+        ),
         references=[
-            "https://owasp.org/www-community/controls/Clickjacking_Defense_Cheat_Sheet",
-            "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy",
             "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie/SameSite",
+            "https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html",
         ],
-        cwe_id=None,
-        cvss_score=None,
-        cvss_vector=None,
-        confidence=Confidence.TENTATIVE,
+        cwe_id="CWE-352",
+        confidence=confidence,
     )
 
 
+# ---------------------------------------------------------------------------
+# L1 + L2: Form token presence + uniqueness
+# ---------------------------------------------------------------------------
+
 def scan_form_tags(
-    html: str,
+    html1: str,
+    html2: str,
     resp: Any,
     target_url: str,
-) -> Finding:
+) -> List[Finding]:
     """
-    주어진 HTML에서 Form 태그 내 CSRF 취약점을 검사합니다.
-    CSRF 토큰이 발견되지 않으면 Finding 객체를 반환합니다.
+    Validate forms for CSRF tokens (L1) and check token uniqueness (L2).
+
+    - GET forms get LOW severity (not state-changing).
+    - POST/PUT/DELETE/PATCH forms get HIGH severity if token missing.
+    - If token exists but value is identical across two responses, warn about static tokens.
     """
+    findings: List[Finding] = []
 
     try:
-        parser = FormParser()
-        parser.feed(html or "")
-        forms = parser.forms
-    except Exception:
-        forms = []
+        parser1 = FormParser()
+        parser1.feed(html1 or "")
+        forms1 = parser1.forms
 
-    if not forms:
-        return Finding(
+        parser2 = FormParser()
+        parser2.feed(html2 or "")
+        forms2 = parser2.forms
+    except Exception:
+        forms1 = []
+        forms2 = []
+
+    if not forms1:
+        findings.append(Finding(
             id=str(uuid.uuid4()),
             plugin="csrf",
             severity=Severity.INFO,
             title="No Form Tags Found",
-            description="No <form> tags were found on the page — no form-level CSRF checks to perform.",
+            description="No <form> tags were found on the page.",
             url=target_url,
-            parameter=None,
-            method="GET",
-            payload=None,
             evidence="No <form> tags present in response HTML.",
-            request=HTTPRequest(
-                method="GET",
-                url=target_url,
-                headers=dict(resp.request.headers)
-                if hasattr(resp, "request") and hasattr(resp.request, "headers")
-                else {},
-                body=None,
-                cookies=dict(resp.request._cookies)
-                if hasattr(resp.request, "_cookies")
-                else {},
-            ),
+            request=_build_request(resp, target_url),
             response=None,
-            remediation="If the application uses forms, ensure anti-CSRF tokens are added to state-changing forms.",
-            references=["https://owasp.org/www-community/attacks/csrf"],
-            cwe_id=None,
-            cvss_score=None,
-            cvss_vector=None,
             confidence=Confidence.TENTATIVE,
-        )
+        ))
+        return findings
 
-    vulnerable = []
-    for idx, form in enumerate(forms):
+    for idx, form in enumerate(forms1):
+        form_method = (form.get("attrs", {}).get("method", "get")).upper()
         inputs = form.get("inputs", [])
-        form_html = (form.get("html") or "").lower()
+        is_state_changing = form_method in ("POST", "PUT", "DELETE", "PATCH")
 
-        token_found = False
-        # 검증 로직: hidden input 태그 및 name/id 속성 검사, CSRF_TOKEN_KEYWORDS 포함 여부 검사
-        for inp in inputs:
-            name = inp.get("name", "").lower()
-            idv = inp.get("id", "").lower()
-            itype = inp.get("type", "").lower()
+        # L1: Check for token-like hidden input
+        token_input = _find_token_input(inputs)
 
-            if itype == "hidden" and (
-                "csrf" in name or "token" in name or "authenticity" in name
-            ):
-                token_found = True
-                break
+        if token_input is None:
+            severity = Severity.HIGH if is_state_changing else Severity.LOW
+            snippet = _form_snippet(form)
+            findings.append(Finding(
+                id=str(uuid.uuid4()),
+                plugin="csrf",
+                severity=severity,
+                title=f"Form #{idx + 1} ({form_method}) Missing CSRF Token",
+                description=(
+                    f"A {form_method} form does not include an anti-CSRF token. "
+                    + ("This form performs state-changing actions and is vulnerable to CSRF."
+                       if is_state_changing
+                       else "This GET form is lower risk but should still be reviewed.")
+                ),
+                url=target_url,
+                evidence=f"Form snippet: {snippet}",
+                request=_build_request(resp, target_url),
+                response=None,
+                remediation=(
+                    "Add a server-validated anti-CSRF token (synchronizer token pattern) "
+                    "to all state-changing forms."
+                ),
+                references=[
+                    "https://owasp.org/www-community/attacks/csrf",
+                    "https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html",
+                ],
+                cwe_id="CWE-352",
+                cvss_score=6.8 if is_state_changing else 3.1,
+                cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N" if is_state_changing else None,
+                confidence=Confidence.FIRM if is_state_changing else Confidence.TENTATIVE,
+            ))
+        else:
+            # L2: Token found -- check uniqueness across two requests
+            token_value1 = token_input.get("value", "")
+            token_name = token_input.get("name", "")
 
-            if any(k.lower() in name for k in CSRF_TOKEN_KEYWORDS) or any(
-                k.lower() in idv for k in CSRF_TOKEN_KEYWORDS
-            ):
-                token_found = True
-                break
+            token_value2 = _get_token_value_from_forms(forms2, idx, token_name)
 
-        if not token_found and any(k.lower() in form_html for k in CSRF_TOKEN_KEYWORDS):
-            token_found = True
+            if token_value1 and token_value2 and token_value1 == token_value2:
+                findings.append(Finding(
+                    id=str(uuid.uuid4()),
+                    plugin="csrf",
+                    severity=Severity.MEDIUM,
+                    title=f"Form #{idx + 1} Has Static CSRF Token",
+                    description=(
+                        f"The CSRF token '{token_name}' has the same value across two "
+                        "separate requests. Static tokens offer weaker protection against CSRF."
+                    ),
+                    url=target_url,
+                    evidence=f"Token '{token_name}' value unchanged: {token_value1[:60]}",
+                    request=_build_request(resp, target_url),
+                    response=None,
+                    remediation="Generate a unique, unpredictable CSRF token per session or per request.",
+                    references=[
+                        "https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html",
+                    ],
+                    cwe_id="CWE-352",
+                    confidence=Confidence.FIRM,
+                ))
 
-        if not token_found:
-            vulnerable.append({"index": idx, "form": form})
-
-    if vulnerable:
-        sample = (
-            vulnerable[0]["form"]["html"]
-            if isinstance(vulnerable[0]["form"], dict)
-            else str(vulnerable[0]["form"])
-        )
-        snippet = (sample[:400] + "...") if sample and len(sample) > 400 else sample
-        evidence = (
-            f"{len(vulnerable)} form(s) missing CSRF token. Example snippet: {snippet}"
-        )
-
-        return Finding(
+    # If no issues found, emit an INFO
+    if not findings:
+        findings.append(Finding(
             id=str(uuid.uuid4()),
             plugin="csrf",
-            severity=Severity.HIGH,
-            title="Form(s) Missing CSRF Token",
-            description=(
-                "One or more <form> elements do not appear to include anti-CSRF tokens in hidden inputs "
-                "or identifiable token fields. This may allow CSRF attacks against state-changing endpoints."
-            ),
+            severity=Severity.INFO,
+            title="Forms Include CSRF Tokens",
+            description="All detected <form> elements include anti-CSRF tokens with unique values.",
             url=target_url,
-            parameter=None,
-            method="GET",
-            payload=None,
-            evidence=evidence,
-            request=HTTPRequest(
-                method="GET",
-                url=target_url,
-                headers=dict(resp.request.headers)
-                if hasattr(resp, "request") and hasattr(resp.request, "headers")
-                else {},
-                body=None,
-                cookies=dict(resp.request._cookies)
-                if hasattr(resp.request, "_cookies")
-                else {},
-            ),
+            evidence="CSRF token-like inputs found in all forms.",
+            request=_build_request(resp, target_url),
             response=None,
-            remediation=(
-                "Add server-validated anti-CSRF tokens (e.g. synchronizer token pattern or SameSite cookies) "
-                "to all state-changing forms and validate them on the server side."
-            ),
-            references=[
-                "https://owasp.org/www-community/attacks/csrf",
-                "https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html",
-            ],
-            cwe_id="CWE-352",
-            cvss_score=6.8,
-            cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N",
-            confidence=Confidence.FIRM,
-        )
+            confidence=Confidence.TENTATIVE,
+        ))
 
-    return Finding(
-        id=str(uuid.uuid4()),
-        plugin="csrf",
-        severity=Severity.INFO,
-        title="Forms Include CSRF Tokens",
-        description="All detected <form> elements contain indications of anti-CSRF tokens.",
-        url=target_url,
-        parameter=None,
-        method="GET",
-        payload=None,
-        evidence="CSRF token-like inputs found in all forms.",
-        request=HTTPRequest(
+    return findings
+
+
+def _find_token_input(inputs: list) -> Optional[dict]:
+    """Find a hidden input that looks like a CSRF token."""
+    for inp in inputs:
+        name = inp.get("name", "").lower()
+        idv = inp.get("id", "").lower()
+        itype = inp.get("type", "").lower()
+
+        if itype == "hidden" and any(
+            k.lower() in name or k.lower() in idv for k in CSRF_TOKEN_KEYWORDS
+        ):
+            return inp
+
+        if any(k.lower() in name for k in CSRF_TOKEN_KEYWORDS) or any(
+            k.lower() in idv for k in CSRF_TOKEN_KEYWORDS
+        ):
+            return inp
+    return None
+
+
+def _get_token_value_from_forms(forms: list, form_idx: int, token_name: str) -> str:
+    """Get the token value from the same form index in a second parse result."""
+    if form_idx >= len(forms):
+        return ""
+    inputs = forms[form_idx].get("inputs", [])
+    for inp in inputs:
+        if inp.get("name", "").lower() == token_name.lower():
+            return inp.get("value", "")
+    return ""
+
+
+def _form_snippet(form: dict) -> str:
+    """Return a truncated HTML snippet of a form."""
+    html = form.get("html", "") if isinstance(form, dict) else str(form)
+    return (html[:300] + "...") if html and len(html) > 300 else html
+
+
+def _build_request(resp: Any, target_url: str) -> Optional[HTTPRequest]:
+    """Safely build an HTTPRequest from a response object."""
+    try:
+        return HTTPRequest(
             method="GET",
             url=target_url,
             headers=dict(resp.request.headers)
@@ -382,14 +416,367 @@ def scan_form_tags(
             else {},
             body=None,
             cookies=dict(resp.request._cookies)
-            if hasattr(resp.request, "_cookies")
+            if hasattr(resp, "request") and hasattr(resp.request, "_cookies")
             else {},
-        ),
-        response=None,
-        remediation=None,
-        references=["https://owasp.org/www-community/attacks/csrf"],
-        cwe_id=None,
-        cvss_score=None,
-        cvss_vector=None,
-        confidence=Confidence.TENTATIVE,
-    )
+        )
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# L4 + L8: Origin validation + CORS misconfiguration
+# ---------------------------------------------------------------------------
+
+def scan_origin_validation(session: Any, target_url: str) -> List[Finding]:
+    """
+    L4: Test whether the server validates the Origin header.
+    L8: Check for CORS misconfiguration in the spoofed-origin response.
+
+    Safe: only GET requests are sent.
+    """
+    findings: List[Finding] = []
+    spoofed_origin = "https://evil.example.com"
+
+    try:
+        normal_resp = session.get(target_url, timeout=DEFAULT_TIMEOUT)
+        spoofed_resp = session.get(
+            target_url,
+            timeout=DEFAULT_TIMEOUT,
+            headers={"Origin": spoofed_origin},
+        )
+
+        # --- L4: Origin not validated ---
+        if (
+            hasattr(normal_resp, "status_code")
+            and hasattr(spoofed_resp, "status_code")
+            and normal_resp.status_code == spoofed_resp.status_code == 200
+        ):
+            normal_len = len(getattr(normal_resp, "text", ""))
+            spoofed_len = len(getattr(spoofed_resp, "text", ""))
+            if normal_len > 0 and abs(normal_len - spoofed_len) / normal_len < 0.1:
+                findings.append(Finding(
+                    id=str(uuid.uuid4()),
+                    plugin="csrf",
+                    severity=Severity.MEDIUM,
+                    title="Server Does Not Validate Origin Header",
+                    description=(
+                        "A request with a spoofed Origin header received the same response "
+                        "as a normal request. The server may not validate the Origin header."
+                    ),
+                    url=target_url,
+                    evidence=(
+                        f"Normal: {normal_resp.status_code} ({normal_len}B), "
+                        f"Spoofed: {spoofed_resp.status_code} ({spoofed_len}B)"
+                    ),
+                    request=HTTPRequest(
+                        method="GET", url=target_url,
+                        headers={"Origin": spoofed_origin},
+                    ),
+                    response=None,
+                    remediation=(
+                        "Validate Origin/Referer headers on state-changing endpoints "
+                        "and reject requests from untrusted origins."
+                    ),
+                    references=[
+                        "https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html#verifying-origin-with-standard-headers",
+                    ],
+                    cwe_id="CWE-346",
+                    confidence=Confidence.TENTATIVE,
+                ))
+
+        # --- L8: CORS misconfiguration ---
+        spoofed_headers = getattr(spoofed_resp, "headers", {})
+        if isinstance(spoofed_headers, dict):
+            findings.extend(_check_cors_headers(spoofed_headers, spoofed_origin, target_url))
+
+    except Exception as e:
+        logger.debug("Origin/CORS check skipped for %s: %s", target_url, e)
+
+    return findings
+
+
+def _check_cors_headers(
+    headers: dict,
+    spoofed_origin: str,
+    target_url: str,
+) -> List[Finding]:
+    """L8: Analyze CORS headers from a spoofed-origin response."""
+    findings: List[Finding] = []
+    acao = headers.get("Access-Control-Allow-Origin", "")
+    acac = headers.get("Access-Control-Allow-Credentials", "").lower()
+
+    if not acao:
+        return findings
+
+    # Case 1: Wildcard ACAO + credentials
+    if acao == "*" and acac == "true":
+        findings.append(Finding(
+            id=str(uuid.uuid4()),
+            plugin="csrf",
+            severity=Severity.HIGH,
+            title="CORS Wildcard With Credentials",
+            description=(
+                "Access-Control-Allow-Origin is '*' and Access-Control-Allow-Credentials "
+                "is 'true'. This combination allows any origin to make credentialed "
+                "cross-origin requests, enabling CSRF and data theft."
+            ),
+            url=target_url,
+            evidence=f"ACAO: {acao}, ACAC: {acac}",
+            remediation=(
+                "Never combine Access-Control-Allow-Origin: * with "
+                "Access-Control-Allow-Credentials: true. Whitelist specific trusted origins."
+            ),
+            references=[
+                "https://portswigger.net/web-security/cors",
+                "https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS",
+            ],
+            cwe_id="CWE-942",
+            cvss_score=8.1,
+            cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N",
+            confidence=Confidence.CERTAIN,
+        ))
+
+    # Case 2: Server echoes the spoofed origin back
+    elif acao.lower() == spoofed_origin.lower():
+        severity = Severity.HIGH if acac == "true" else Severity.MEDIUM
+        findings.append(Finding(
+            id=str(uuid.uuid4()),
+            plugin="csrf",
+            severity=severity,
+            title="CORS Origin Reflection" + (" With Credentials" if acac == "true" else ""),
+            description=(
+                f"The server reflected the spoofed Origin '{spoofed_origin}' in the "
+                "Access-Control-Allow-Origin header"
+                + (". Combined with Allow-Credentials: true, this allows "
+                   "credentialed cross-origin requests from any origin."
+                   if acac == "true"
+                   else ". While credentials are not allowed, this may indicate "
+                   "an overly permissive CORS policy.")
+            ),
+            url=target_url,
+            evidence=f"ACAO: {acao}, ACAC: {acac or 'not set'}",
+            remediation=(
+                "Do not blindly reflect the Origin header. Maintain a whitelist "
+                "of trusted origins and validate against it."
+            ),
+            references=[
+                "https://portswigger.net/web-security/cors",
+                "https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS",
+            ],
+            cwe_id="CWE-942",
+            cvss_score=8.1 if acac == "true" else 5.3,
+            confidence=Confidence.CERTAIN if acac == "true" else Confidence.FIRM,
+        ))
+
+    # Case 3: Wildcard without credentials (lower risk)
+    elif acao == "*":
+        findings.append(Finding(
+            id=str(uuid.uuid4()),
+            plugin="csrf",
+            severity=Severity.LOW,
+            title="CORS Allows All Origins",
+            description=(
+                "Access-Control-Allow-Origin is set to '*'. While credentials are not "
+                "included, this allows any site to read responses from this endpoint."
+            ),
+            url=target_url,
+            evidence=f"ACAO: {acao}",
+            remediation="Restrict ACAO to specific trusted origins if the endpoint serves sensitive data.",
+            references=["https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS"],
+            cwe_id="CWE-942",
+            confidence=Confidence.FIRM,
+        ))
+
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# L5: <meta> tag CSRF token scanning
+# ---------------------------------------------------------------------------
+
+def scan_meta_tokens(html1: str, html2: str, target_url: str) -> List[Finding]:
+    """
+    Scan HTML for CSRF tokens embedded in <meta> tags
+    (e.g. Rails csrf-token, Laravel csrf-token).
+
+    Compares values across two responses to detect static tokens.
+    """
+    findings: List[Finding] = []
+
+    tokens1 = _parse_meta_tokens(html1)
+    tokens2 = _parse_meta_tokens(html2)
+
+    if not tokens1:
+        # No meta tokens found -- not necessarily a problem if forms have tokens
+        return findings
+
+    for t1 in tokens1:
+        name = t1["name"]
+        value1 = t1["content"]
+
+        # Find matching token in second response
+        value2 = ""
+        for t2 in tokens2:
+            if t2["name"].lower() == name.lower():
+                value2 = t2["content"]
+                break
+
+        if not value1:
+            findings.append(Finding(
+                id=str(uuid.uuid4()),
+                plugin="csrf",
+                severity=Severity.MEDIUM,
+                title=f"Meta CSRF Token '{name}' Has Empty Value",
+                description=f"<meta name=\"{name}\"> exists but content is empty.",
+                url=target_url,
+                evidence=f"<meta name=\"{name}\" content=\"\">",
+                remediation="Ensure the meta tag CSRF token is populated with a valid, unique value.",
+                references=[
+                    "https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html",
+                ],
+                cwe_id="CWE-352",
+                confidence=Confidence.FIRM,
+            ))
+        elif value2 and value1 == value2:
+            findings.append(Finding(
+                id=str(uuid.uuid4()),
+                plugin="csrf",
+                severity=Severity.MEDIUM,
+                title=f"Meta CSRF Token '{name}' Is Static",
+                description=(
+                    f"<meta name=\"{name}\"> has the same value across two requests. "
+                    "Static tokens offer weaker CSRF protection."
+                ),
+                url=target_url,
+                evidence=f"Token value unchanged: {value1[:60]}",
+                remediation="Generate unique CSRF tokens per session or per request.",
+                references=[
+                    "https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html",
+                ],
+                cwe_id="CWE-352",
+                confidence=Confidence.FIRM,
+            ))
+
+    return findings
+
+
+def _parse_meta_tokens(html: str) -> list:
+    """Extract CSRF-related meta tags from HTML."""
+    parser = MetaTokenParser(META_CSRF_NAMES)
+    try:
+        parser.feed(html or "")
+    except Exception:
+        pass
+    return parser.tokens
+
+
+# ---------------------------------------------------------------------------
+# L6: <script> global JS variable CSRF token scanning
+# ---------------------------------------------------------------------------
+
+def scan_js_tokens(html1: str, html2: str, target_url: str) -> List[Finding]:
+    """
+    Scan HTML <script> blocks for CSRF tokens assigned to global JS variables.
+
+    Compares values across two responses to detect static tokens.
+    """
+    findings: List[Finding] = []
+
+    matches1 = re.findall(JS_TOKEN_PATTERN, html1 or "", re.IGNORECASE)
+    matches2 = re.findall(JS_TOKEN_PATTERN, html2 or "", re.IGNORECASE)
+
+    if not matches1:
+        return findings
+
+    for i, value1 in enumerate(matches1):
+        value2 = matches2[i] if i < len(matches2) else ""
+
+        if value2 and value1 == value2:
+            findings.append(Finding(
+                id=str(uuid.uuid4()),
+                plugin="csrf",
+                severity=Severity.MEDIUM,
+                title="JS Global CSRF Token Is Static",
+                description=(
+                    "A CSRF token assigned to a JavaScript variable has the same value "
+                    "across two separate requests. Static tokens weaken CSRF protection."
+                ),
+                url=target_url,
+                evidence=f"JS token value unchanged: {value1[:60]}",
+                remediation="Generate unique CSRF tokens per session or per request.",
+                references=[
+                    "https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html",
+                ],
+                cwe_id="CWE-352",
+                confidence=Confidence.FIRM,
+            ))
+
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# L7: API custom header requirement
+# ---------------------------------------------------------------------------
+
+def scan_custom_header_requirement(session: Any, target_url: str) -> List[Finding]:
+    """
+    Check whether the server differentiates between requests with and without
+    the X-Requested-With header.
+
+    If both responses are identical (200, similar body), the server likely does
+    not require a custom header for CSRF protection.
+
+    Safe: GET requests only.
+    """
+    findings: List[Finding] = []
+
+    try:
+        resp_with = session.get(
+            target_url,
+            timeout=DEFAULT_TIMEOUT,
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        resp_without = session.get(target_url, timeout=DEFAULT_TIMEOUT)
+
+        if (
+            hasattr(resp_with, "status_code")
+            and hasattr(resp_without, "status_code")
+            and resp_with.status_code == resp_without.status_code == 200
+        ):
+            len_with = len(getattr(resp_with, "text", ""))
+            len_without = len(getattr(resp_without, "text", ""))
+            if len_with > 0 and abs(len_with - len_without) / len_with < 0.1:
+                findings.append(Finding(
+                    id=str(uuid.uuid4()),
+                    plugin="csrf",
+                    severity=Severity.LOW,
+                    title="Server Does Not Require X-Requested-With Header",
+                    description=(
+                        "Responses with and without the X-Requested-With header are identical. "
+                        "The server does not appear to use custom header validation as a CSRF defense."
+                    ),
+                    url=target_url,
+                    evidence=(
+                        f"With header: {resp_with.status_code} ({len_with}B), "
+                        f"Without: {resp_without.status_code} ({len_without}B)"
+                    ),
+                    request=HTTPRequest(
+                        method="GET", url=target_url,
+                        headers={"X-Requested-With": "XMLHttpRequest"},
+                    ),
+                    response=None,
+                    remediation=(
+                        "For API endpoints, consider requiring X-Requested-With or a custom "
+                        "header and rejecting requests that lack it."
+                    ),
+                    references=[
+                        "https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html#use-of-custom-request-headers",
+                    ],
+                    cwe_id="CWE-352",
+                    confidence=Confidence.TENTATIVE,
+                ))
+
+    except Exception as e:
+        logger.debug("Custom header check skipped for %s: %s", target_url, e)
+
+    return findings

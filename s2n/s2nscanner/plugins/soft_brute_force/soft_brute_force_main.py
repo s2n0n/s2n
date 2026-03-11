@@ -1,10 +1,10 @@
 
 from __future__ import annotations
 
-import logging
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urljoin
 from uuid import uuid4
 
 from s2n.s2nscanner.clients.http_client import HttpClient
@@ -18,6 +18,7 @@ from s2n.s2nscanner.interfaces import (
     Confidence,
 )
 from s2n.s2nscanner.logger import get_logger
+from s2n.s2nscanner.plugins.helper import FormParser
 
 logger = get_logger("plugins.soft_brute_force")
 
@@ -128,14 +129,51 @@ class SoftBruteForcePlugin:
         initial_response = client.get(url)
         requests_sent += 1
 
+        # 폼 파싱으로 실제 필드명 추출
+        parser = FormParser()
+        parser.feed(initial_response.text)
+        
+        login_form = None
+        # Password 필드가 있는 첫 번째 폼을 로그인 폼으로 간주
+        for form in parser.forms:
+            if any(inp.get("type") == "password" for inp in form.inputs):
+                login_form = form
+                break
+
+        if login_form:
+            base_data = {}
+            for inp in login_form.inputs:
+                name = inp.get("name")
+                if name and inp.get("type") not in ["submit", "button", "reset"]:
+                    base_data[name] = inp.get("value", "")
+            
+            password_field = next((inp.get("name") for inp in login_form.inputs if inp.get("type") == "password" and inp.get("name")), "password")
+            
+            # 텍스트 계열 필드를 username 필드로 간주
+            text_fields = [inp.get("name") for inp in login_form.inputs if inp.get("type") in [None, "text", "email"] and inp.get("name")]
+            username_field = text_fields[0] if text_fields else "username"
+            
+            action = login_form.get("action")
+            post_url = urljoin(url, action) if action else url
+            logger.info("Parsed login form. Username field: %s, Password field: %s, Action URL: %s", username_field, password_field, post_url)
+        else:
+            base_data = {}
+            username_field = "username"
+            password_field = "password"
+            post_url = url
+            logger.info("No login form detected. Falling back to default fields: %s, %s", username_field, password_field)
+
         responses = []
         start_time = time.time()
         
         for i in range(self.rate_limit_attempts):
             # Send garbage credentials
-            data = {"username": f"invalid_user_{i}", "password": f"invalid_pass_{i}"}
+            data = dict(base_data)
+            data[username_field] = f"invalid_user_{i}"
+            data[password_field] = f"invalid_pass_{i}"
+            
             try:
-                resp = client.post(url, data=data)
+                resp = client.post(post_url, data=data)
                 responses.append(resp)
                 requests_sent += 1
                 time.sleep(RATE_LIMIT_DELAY)

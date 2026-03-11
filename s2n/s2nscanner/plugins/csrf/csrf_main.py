@@ -1,4 +1,5 @@
-from datetime import datetime
+import traceback
+from datetime import datetime, timezone
 from typing import List, Optional
 
 # 패키지 실행과 직접 실행을 모두 지원하기 위한 import 처리
@@ -32,7 +33,7 @@ class CSRFScanner:
 
     # CSRFScanner.run(플러그인_컨텍스트)로 플러그인을 실행합니다.
     def run(self, plugin_context: PluginContext) -> PluginResult:
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
         findings: List[Finding] = []
         # 나중에 타입 확인 
         client = plugin_context.scan_context.http_client
@@ -53,7 +54,7 @@ class CSRFScanner:
                 scan_result = csrf_scan(url, http_client=client, plugin_context=plugin_context)
                 findings.extend(scan_result)
 
-            end_time = datetime.now()
+            end_time = datetime.now(timezone.utc)
             return PluginResult(
                 plugin_name=self.name,
                 status=PluginStatus.PARTIAL if findings else PluginStatus.SUCCESS,
@@ -62,12 +63,12 @@ class CSRFScanner:
                 end_time=end_time,
                 duration_seconds=(end_time - start_time).total_seconds(),
                 urls_scanned=total_urls,
-                requests_sent=total_urls  # Approximation
+                requests_sent=total_urls * 6  # 2 (L2) + 2 (L4/L8) + 2 (L7)
             )
 
         except Exception as e:
             logger.exception("[CSRFScanner.run] plugin error: %s", e)
-            end_time = datetime.now()
+            end_time = datetime.now(timezone.utc)
             return PluginResult(
                 plugin_name=self.name,
                 status=PluginStatus.FAILED,
@@ -78,7 +79,7 @@ class CSRFScanner:
                 error=PluginError(
                     error_type=type(e).__name__,
                     message=str(e),
-                    traceback=str(e.__traceback__)
+                    traceback=traceback.format_exc()
                 )
             )
 
