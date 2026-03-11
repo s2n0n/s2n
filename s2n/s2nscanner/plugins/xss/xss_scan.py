@@ -445,6 +445,11 @@ class ReflectedScanner:
             # 파라미터 스캔
             self._scan_parameter(point, param_name, payloads, http_client, timeout)
 
+        # Stored XSS 테스트
+        stored_result = self._test_stored(point)
+        if stored_result:
+            self._record_stored(point, stored_result)
+
     def _scan_single_url(
         self, url: str, http_client: Any, max_payloads: int, timeout: int
     ) -> None:
@@ -537,8 +542,6 @@ class ReflectedScanner:
             error=plugin_error,
             metadata=metadata,
         )
-
-        # Stored XSS 테스트
 
     def _test_stored(self, point: InputPoint) -> Optional[PayloadResult]:
         params = point.parameters.copy()
