@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add s2n/s2nscanner/plugins/xss/xss_scan.py)",
+      "Bash(git commit -m \"fix\\(xss\\): _scan_input_point에서 _test_stored 호출 누락 수정\")"
+    ]
+  }
+}
