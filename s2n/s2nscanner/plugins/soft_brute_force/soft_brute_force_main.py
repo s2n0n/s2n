@@ -181,7 +181,11 @@ class SoftBruteForcePlugin:
                 logger.debug("Request failed during rate limit check: %s", e)
 
         duration = time.time() - start_time
-        
+
+        if not responses:
+            logger.warning("All %d POST requests failed (network error or connection refused). Skipping rate limit analysis.", self.rate_limit_attempts)
+            return [], requests_sent
+
         # Analyze responses
         # 1. Check for 429 Too Many Requests
         if any(r.status_code == 429 for r in responses):
