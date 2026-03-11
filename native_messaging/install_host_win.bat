@@ -31,6 +31,13 @@ set EXTENSION_ID=%~1
 REM ----- 경로 설정 -----
 set SCRIPT_DIR=%~dp0
 set PROJECT_ROOT=%SCRIPT_DIR%..
+
+if exist "%SCRIPT_DIR%\.venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%SCRIPT_DIR%\.venv\Scripts\python.exe"
+) else (
+    set "PYTHON_EXE=python"
+)
+
 set NATIVE_HOST_PATH=%PROJECT_ROOT%\native_host.py
 set MANIFEST_TEMPLATE=%SCRIPT_DIR%%HOST_NAME%.json
 set TARGET_DIR=%LOCALAPPDATA%\Google\Chrome\User Data\NativeMessagingHosts

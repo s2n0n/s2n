@@ -189,6 +189,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         currentScanState.status = 'idle'
         currentScanState.progress = null
+        currentScanState.error = null
         broadcastStateUpdate()
         sendResponse({ success: true })
         return false

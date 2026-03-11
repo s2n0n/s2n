@@ -58,6 +58,15 @@ except ImportError:
 # stdout 쓰기 동기화를 위한 Lock (멀티스레드 스캔 결과를 안전하게 전송)
 write_lock = threading.Lock()
 
+# Chrome의 Native Messaging 통신 채널 보존
+REAL_STDIN = sys.stdin.buffer
+REAL_STDOUT = sys.stdout.buffer
+
+# 플러그인 등에서 input() 이나 print() 를 호출하여
+# Native Messaging 프로토콜이 오염되거나 끊기는 것을 방지합니다.
+sys.stdin = open(os.devnull, 'r')
+sys.stdout = open(os.devnull, 'w')
+
 # 현재 스캔 스레드를 추적 (명시적 중단 기능이 지원되면 사용할 목적)
 current_scan_thread: Optional[threading.Thread] = None
 
@@ -75,7 +84,7 @@ def read_message() -> Optional[Dict[str, Any]]:
         파싱된 JSON dict 또는 EOF 시 None
     """
     # 4바이트 길이 헤더 읽기
-    raw_length = sys.stdin.buffer.read(4)
+    raw_length = REAL_STDIN.read(4)
     if not raw_length or len(raw_length) < 4:
         return None
 
@@ -91,7 +100,7 @@ def read_message() -> Optional[Dict[str, Any]]:
         return None
 
     # JSON body 읽기
-    raw_message = sys.stdin.buffer.read(message_length)
+    raw_message = REAL_STDIN.read(message_length)
     if len(raw_message) < message_length:
         log_error(f"불완전한 메시지: expected={message_length}, got={len(raw_message)}")
         return None
@@ -110,9 +119,9 @@ def write_message(message: Dict[str, Any]) -> None:
     with write_lock:
         try:
             # 4바이트 길이 헤더 + JSON body 쓰기
-            sys.stdout.buffer.write(struct.pack('<I', length))
-            sys.stdout.buffer.write(encoded)
-            sys.stdout.buffer.flush()
+            REAL_STDOUT.write(struct.pack('<I', length))
+            REAL_STDOUT.write(encoded)
+            REAL_STDOUT.flush()
         except Exception as e:
             log_error(f"메시지 전송 실패: {e}")
 

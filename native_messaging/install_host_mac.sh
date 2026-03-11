@@ -82,7 +82,8 @@ export PYTHONPATH="\$SCRIPT_DIR:\$SCRIPT_DIR/s2n:\$PYTHONPATH"
 if [ -f "\$SCRIPT_DIR/.venv/bin/python3" ]; then
     PYTHON_EXE="\$SCRIPT_DIR/.venv/bin/python3"
 else
-    PYTHON_EXE="/usr/bin/python3"
+    # Automatically capture the python3 that is active when the script runs
+    PYTHON_EXE="$(which python3)"
 fi
 
 exec "\$PYTHON_EXE" "\$SCRIPT_DIR/native_host.py" "\$@"

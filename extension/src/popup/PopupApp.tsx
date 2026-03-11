@@ -10,7 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { useScan } from '@/hooks/useScan'
 import { AVAILABLE_PLUGINS } from '@/types/scan'
 import type { Severity } from '@/types/scan'
-import { Play, Square, Loader2, AlertTriangle, Shield, CheckCircle2 } from 'lucide-react'
+import { Play, Square, Loader2, AlertTriangle, Shield, CheckCircle2, X } from 'lucide-react'
 
 // Severity 뱃지 컬러 맵핑
 const severityColors: Record<Severity, string> = {
@@ -64,7 +64,7 @@ export function PopupApp() {
     }
 
     return (
-        <div className="flex flex-col w-[420px] h-[600px] bg-background text-foreground overflow-hidden font-sans border border-border shadow-2xl relative">
+        <div className="flex flex-col w-[420px] h-[540px] bg-background text-foreground overflow-hidden font-sans border border-border shadow-2xl relative">
             
             {/* Background Glow Effect */}
             <div className="absolute top-[-50px] left-[-50px] w-[200px] h-[200px] bg-primary/10 rounded-full blur-[80px] pointer-events-none" />
@@ -103,9 +103,14 @@ export function PopupApp() {
             <ScrollArea className="flex-1 px-5 py-4 z-10">
                 
                 {state.error && (
-                    <div className="mb-5 p-3.5 text-xs bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 rounded-xl flex items-start gap-2.5 shadow-sm animate-in slide-in-from-top-2">
-                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                        <span className="leading-snug">{state.error}</span>
+                    <div className="mb-5 p-3.5 text-xs bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 rounded-xl flex items-start justify-between gap-2.5 shadow-sm animate-in slide-in-from-top-2">
+                        <div className="flex items-start gap-2.5">
+                            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                            <span className="leading-snug">{state.error}</span>
+                        </div>
+                        <button type="button" onClick={stopScan} className="text-red-500/60 hover:text-red-500 transition-colors">
+                            <X className="w-4 h-4" />
+                        </button>
                     </div>
                 )}
 
