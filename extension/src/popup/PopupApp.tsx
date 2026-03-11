@@ -1,331 +1,628 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { FormEvent } from 'react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Progress } from '@/components/ui/progress'
-import { Badge } from '@/components/ui/badge'
-import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useScan } from '@/hooks/useScan'
 import { AVAILABLE_PLUGINS } from '@/types/scan'
 import type { Severity } from '@/types/scan'
-import { Play, Square, Loader2, AlertTriangle, Shield, CheckCircle2, X } from 'lucide-react'
+import {
+    Play, Square, Loader2, AlertTriangle,
+    ShieldCheck, ShieldAlert, X, Download,
+    House, ChevronDown, ChevronUp, Info,
+} from 'lucide-react'
+import { exportFindingsToJson, exportFindingsToHtml } from '@/lib/export'
 
-// Severity 뱃지 컬러 맵핑
-const severityColors: Record<Severity, string> = {
-    CRITICAL: 'bg-red-500/10 text-red-500 border-red-500/20',
-    HIGH: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
-    MEDIUM: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
-    LOW: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
-    INFO: 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20',
+const SEV: Record<Severity, { dot: string; label: string; bar: string }> = {
+    CRITICAL: { dot: '#ef4444', label: '#f87171', bar: '#ef4444' },
+    HIGH: { dot: '#f97316', label: '#fb923c', bar: '#f97316' },
+    MEDIUM: { dot: '#eab308', label: '#facc15', bar: '#eab308' },
+    LOW: { dot: '#3b82f6', label: '#60a5fa', bar: '#3b82f6' },
+    INFO: { dot: '#71717a', label: '#a1a1aa', bar: '#71717a' },
+}
+const SEV_ORDER: Severity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
+
+const cleanMsg = (s: string) =>
+    s.replace(/[\u{1F000}-\u{1FFFF}]/gu, '').replace(/\s{2,}/g, ' ').trim()
+
+const css = {
+    root: {
+        width: 420,
+        height: 560,
+        display: 'flex',
+        flexDirection: 'column' as const,
+        background: '#111113',
+        color: '#f4f4f5',
+        fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, sans-serif',
+        overflow: 'hidden',
+        fontSize: 13,
+    },
+    header: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '12px 16px',
+        borderBottom: '1px solid rgba(255,255,255,0.07)',
+        flexShrink: 0,
+    },
+    label: {
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase' as const,
+        color: 'rgba(255,255,255,0.3)',
+    },
+    input: {
+        width: '100%',
+        height: 38,
+        padding: '0 12px',
+        borderRadius: 8,
+        background: 'rgba(255,255,255,0.05)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        color: '#f4f4f5',
+        fontSize: 12,
+        outline: 'none',
+        transition: 'border-color 0.15s',
+        boxSizing: 'border-box' as const,
+        fontFamily: 'inherit',
+    },
+    card: {
+        borderRadius: 8,
+        background: 'rgba(255,255,255,0.04)',
+        border: '1px solid rgba(255,255,255,0.07)',
+        padding: '10px 12px',
+    },
+    btn: {
+        width: '100%',
+        height: 38,
+        borderRadius: 8,
+        border: 'none',
+        background: '#f4f4f5',
+        color: '#111113',
+        fontSize: 12,
+        fontWeight: 700,
+        letterSpacing: '0.04em',
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 7,
+        transition: 'opacity 0.15s, transform 0.1s',
+        fontFamily: 'inherit',
+    },
+    divider: {
+        height: 1,
+        background: 'rgba(255,255,255,0.06)',
+        margin: '4px 0',
+    },
 }
 
 export function PopupApp() {
     const { state, startScan, stopScan } = useScan()
     const [url, setUrl] = useState('')
-    const [selectedPlugins, setSelectedPlugins] = useState<string[]>(AVAILABLE_PLUGINS.map(p => p.id))
-    const [isDarkMode, setIsDarkMode] = useState(
-        window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)').matches : false
-    )
+    const [selected, setSelected] = useState<string[]>(AVAILABLE_PLUGINS.map(p => p.id))
+    const [showFindings, setShowFindings] = useState(false)
+    const [smoothPct, setSmoothPct] = useState(0)
+    const smoothPctRef = useRef(0)
 
     const isScanning = state.status === 'validating' || state.status === 'scanning'
     const isCompleted = state.status === 'completed'
+    const isIdle = !isScanning && !isCompleted
+    const total = state.summary?.totalFindings ?? 0
+    const hasFindings = total > 0
+    const maxCount = Math.max(...SEV_ORDER.map(s => state.summary?.severityCounts[s] ?? 0), 1)
+    const pct = Math.max(0, state.progress?.percent ?? 0)
 
-    // 현재 탭 액티브 시 URL 자동 할당 및 시스템 테마 변경에 따른 로고 전환
+    // 스캔 시작/종료 시 smoothPct 리셋
+    useEffect(() => {
+        if (!isScanning) {
+            smoothPctRef.current = 0
+            setSmoothPct(0)
+            return
+        }
+        // 실제 pct보다 smoothPct가 낮으면 따라가고,
+        // 실제 pct 업데이트 없이도 천천히 올라가는 fake 애니메이션
+        const interval = setInterval(() => {
+            const target = pct > 0 ? pct : Math.min(smoothPctRef.current + 0.3, 85)
+            const next = smoothPctRef.current + (target - smoothPctRef.current) * 0.08
+            // 실제 값보다 앞서가지 않도록
+            const clamped = Math.min(next, pct > 0 ? pct : 85)
+            smoothPctRef.current = clamped
+            setSmoothPct(clamped)
+        }, 100)
+        return () => clearInterval(interval)
+    }, [isScanning, pct])
+
     useEffect(() => {
         if (!url && chrome?.tabs) {
-            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                const currentTabUrl = tabs[0]?.url
-                if (currentTabUrl && currentTabUrl.startsWith('http')) {
-                    setUrl(currentTabUrl)
-                }
+            chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+                const u = tabs[0]?.url
+                if (u?.startsWith('http')) setUrl(u)
             })
-        }
-        
-        if (window.matchMedia) {
-            const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-            const handler = (e: MediaQueryListEvent) => setIsDarkMode(e.matches)
-            mediaQuery.addEventListener('change', handler)
-            return () => mediaQuery.removeEventListener('change', handler)
         }
     }, [])
 
     const handleStart = (e: FormEvent) => {
         e.preventDefault()
-        if (!url) return
-        startScan(url, selectedPlugins)
+        if (url && selected.length > 0) startScan(url, selected)
     }
-
-    const togglePlugin = (pluginId: string) => {
-        setSelectedPlugins((prev) =>
-            prev.includes(pluginId) ? prev.filter((id) => id !== pluginId) : [...prev, pluginId]
-        )
-    }
+    const toggle = (id: string) =>
+        setSelected(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id])
+    const handleHome = () => { setShowFindings(false); stopScan() }
+    const exportData = () => ({
+        scanId: `export_${Date.now()}`,
+        targetUrl: state.targetUrl,
+        timestamp: new Date().toISOString(),
+        status: state.status,
+        summary: state.summary ?? {
+            totalFindings: 0, durationSeconds: 0,
+            severityCounts: { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 },
+            pluginCounts: {}, totalUrlsScanned: 0,
+        },
+        findings: state.findings,
+    })
 
     return (
-        <div className="flex flex-col w-[420px] h-[540px] bg-background text-foreground overflow-hidden font-sans border border-border shadow-2xl relative">
-            
-            {/* Background Glow Effect */}
-            <div className="absolute top-[-50px] left-[-50px] w-[200px] h-[200px] bg-primary/10 rounded-full blur-[80px] pointer-events-none" />
-            <div className="absolute bottom-[-50px] right-[-50px] w-[200px] h-[200px] bg-blue-500/10 rounded-full blur-[80px] pointer-events-none" />
+        <div style={css.root}>
 
-            {/* Header */}
-            <header className="flex items-center gap-3 px-5 py-4 border-b border-border bg-card/60 backdrop-blur-md z-10 sticky top-0">
-                <div className="flex-shrink-0 w-9 h-9 flex items-center justify-center bg-primary/5 rounded-xl border border-primary/20 shadow-sm relative overflow-hidden group">
-                    <div className="absolute inset-0 bg-gradient-to-tr from-primary/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                    {/* JS 기반 OS 테마 감지 로고 교체 (Tailwind의 dark: 클래스 충돌 방지) */}
-                    <img src={isDarkMode ? "icons/logo1.png" : "icons/logo2.png"} alt="S2N Logo" className="w-5 h-5 object-contain" />
-                </div>
-                <div>
-                    <h1 className="text-sm font-semibold tracking-tight text-foreground/90">S2N Security</h1>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                        </span>
-                        <p className="text-[10px] text-muted-foreground font-medium">Native Engine</p>
+            {/* ── HEADER ── */}
+            <header style={css.header}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {/* Logo box — neutral bg so both logos work */}
+                    <div style={{
+                        width: 28, height: 28, borderRadius: 7,
+                        background: 'rgba(255,255,255,0.08)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0,
+                    }}>
+                        <img src="icons/logo2.png" alt="S2N"
+                            style={{ width: 16, height: 16, objectFit: 'contain' }} />
+                    </div>
+                    <div>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: '#fff', letterSpacing: '-0.01em' }}>S2N</span>
+                        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginLeft: 6, fontWeight: 400 }}>Security Scanner</span>
                     </div>
                 </div>
-                {state.status === 'idle' && (
-                    <Badge variant="secondary" className="ml-auto text-[10px] uppercase font-semibold bg-background border border-border">
-                        Ready
-                    </Badge>
-                )}
-                {isScanning && (
-                    <Badge variant="default" className="ml-auto text-[10px] uppercase flex items-center gap-1 shadow-sm">
-                        <Loader2 className="w-3 h-3 animate-spin" /> Scanning
-                    </Badge>
-                )}
+
+                {/* Status chip */}
+                <div style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '4px 10px', borderRadius: 20,
+                    background: isScanning ? 'rgba(59,130,246,0.12)' :
+                        isCompleted ? 'rgba(34,197,94,0.1)' :
+                            state.status === 'failed' ? 'rgba(239,68,68,0.1)' :
+                                'rgba(255,255,255,0.06)',
+                    border: `1px solid ${isScanning ? 'rgba(59,130,246,0.25)' :
+                            isCompleted ? 'rgba(34,197,94,0.2)' :
+                                state.status === 'failed' ? 'rgba(239,68,68,0.2)' :
+                                    'rgba(255,255,255,0.08)'
+                        }`,
+                }}>
+                    <span style={{
+                        width: 6, height: 6, borderRadius: '50%',
+                        background: isScanning ? '#3b82f6' :
+                            isCompleted ? '#22c55e' :
+                                state.status === 'failed' ? '#ef4444' : '#52525b',
+                        flexShrink: 0,
+                        boxShadow: isScanning ? '0 0 0 2px rgba(59,130,246,0.3)' : 'none',
+                        animation: isScanning ? 'pulse 1.5s infinite' : 'none',
+                    }} />
+                    <span style={{
+                        fontSize: 10, fontWeight: 600, letterSpacing: '0.08em',
+                        textTransform: 'uppercase',
+                        color: isScanning ? '#60a5fa' :
+                            isCompleted ? '#4ade80' :
+                                state.status === 'failed' ? '#f87171' : 'rgba(255,255,255,0.4)',
+                    }}>
+                        {isScanning ? 'Scanning' : isCompleted ? 'Done' : state.status === 'failed' ? 'Error' : 'Ready'}
+                    </span>
+                </div>
             </header>
 
-            {/* Main Content Area */}
-            <ScrollArea className="flex-1 px-5 py-4 z-10">
-                
-                {state.error && (
-                    <div className="mb-5 p-3.5 text-xs bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 rounded-xl flex items-start justify-between gap-2.5 shadow-sm animate-in slide-in-from-top-2">
-                        <div className="flex items-start gap-2.5">
-                            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                            <span className="leading-snug">{state.error}</span>
-                        </div>
-                        <button type="button" onClick={stopScan} className="text-red-500/60 hover:text-red-500 transition-colors">
-                            <X className="w-4 h-4" />
-                        </button>
-                    </div>
-                )}
+            {/* Thin progress bar under header */}
+            {isScanning && (
+                <div style={{ height: 2, background: 'rgba(255,255,255,0.05)', flexShrink: 0 }}>
+                    <div style={{
+                        height: '100%', width: `${smoothPct}%`,
+                        background: 'linear-gradient(90deg, #3b82f6, #818cf8)',
+                        transition: 'width 0.1s linear',
+                        borderRadius: 1,
+                    }} />
+                </div>
+            )}
 
-                {/* --- 스캔 대기 상태 (idle, failed) --- */}
-                {(!isScanning && !isCompleted) && (
-                    <form onSubmit={handleStart} className="space-y-6 flex flex-col h-full animate-in fade-in duration-500">
-                        <div className="space-y-2.5">
-                            <Label htmlFor="targetUrl" className="text-xs font-semibold text-foreground/80">Target URL</Label>
-                            <Input
-                                id="targetUrl"
-                                type="url"
-                                placeholder="https://example.com"
-                                value={url}
-                                onChange={(e) => setUrl(e.target.value)}
-                                className="h-10 text-sm bg-background border-border/60 hover:border-border transition-colors focus-visible:ring-1 focus-visible:ring-primary/50 shadow-sm rounded-lg"
-                                required
-                            />
-                        </div>
+            {/* ── CONTENT ── */}
+            <ScrollArea className="flex-1 min-h-0">
+                <div style={{ padding: '16px 16px 20px' }}>
 
-                        <div className="space-y-3 flex-1">
-                            <div className="flex items-center justify-between px-0.5">
-                                <Label className="text-xs font-semibold text-foreground/80">Scan Configuration</Label>
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => setSelectedPlugins(selectedPlugins.length === AVAILABLE_PLUGINS.length ? [] : AVAILABLE_PLUGINS.map(p => p.id))}
-                                        className="text-[10px] text-primary/80 hover:text-primary transition-colors font-medium cursor-pointer"
-                                    >
-                                        {selectedPlugins.length === AVAILABLE_PLUGINS.length ? 'Deselect All' : 'Select All'}
-                                    </button>
-                                    <Badge variant="secondary" className="px-1.5 py-0 h-4 text-[9px] bg-muted/50">{selectedPlugins.length}</Badge>
-                                </div>
+                    {/* Error */}
+                    {state.error && (
+                        <div style={{
+                            display: 'flex', alignItems: 'flex-start', gap: 8,
+                            padding: '10px 12px', borderRadius: 8, marginBottom: 14,
+                            background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+                            color: '#f87171', fontSize: 11,
+                        }}>
+                            <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+                            <span style={{ flex: 1, lineHeight: 1.5 }}>{state.error}</span>
+                            <button onClick={stopScan} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#f87171', padding: 0, flexShrink: 0 }}>
+                                <X size={13} />
+                            </button>
+                        </div>
+                    )}
+
+                    {/* ════════ IDLE ════════ */}
+                    {isIdle && (
+                        <form onSubmit={handleStart}>
+                            <div style={{ marginBottom: 16 }}>
+                                <div style={{ ...css.label, marginBottom: 7 }}>Target URL</div>
+                                <input
+                                    type="url"
+                                    placeholder="https://example.com"
+                                    value={url}
+                                    onChange={e => setUrl(e.target.value)}
+                                    required
+                                    style={css.input}
+                                    onFocus={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'}
+                                    onBlur={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'}
+                                />
                             </div>
-                            
-                            <div className="grid grid-cols-2 gap-2">
-                                {AVAILABLE_PLUGINS.map((plugin) => (
-                                    <Label
-                                        key={plugin.id}
-                                        htmlFor={`plugin-${plugin.id}`}
-                                        className={`
-                                            flex items-center space-x-2.5 p-3 rounded-xl border transition-all cursor-pointer select-none
-                                            ${selectedPlugins.includes(plugin.id) 
-                                                ? 'bg-primary/5 border-primary/30 shadow-sm' 
-                                                : 'bg-background hover:bg-muted/30 border-border/50 hover:border-border'}
-                                        `}
-                                        title={plugin.description}
-                                    >
-                                        <Checkbox
-                                            id={`plugin-${plugin.id}`}
-                                            checked={selectedPlugins.includes(plugin.id)}
-                                            onCheckedChange={() => togglePlugin(plugin.id)}
-                                            className="rounded-md"
-                                        />
-                                        <div className="flex flex-col gap-0.5">
-                                            <span className="text-xs font-semibold">{plugin.name}</span>
-                                        </div>
-                                    </Label>
-                                ))}
-                            </div>
-                        </div>
 
-                        <div className="pt-2 pb-1">
-                            <Button 
-                                type="submit" 
-                                size="lg"
-                                className="w-full gap-2 rounded-xl font-semibold shadow-md hover:shadow-lg transition-all"
-                                disabled={!url || selectedPlugins.length === 0}
-                            >
-                                <Play className="w-4 h-4 fill-current" /> Initialize Scan
-                            </Button>
-                        </div>
-                    </form>
-                )}
-
-                {/* --- 스캔 진행 중 (scanning, validating) --- */}
-                {isScanning && (
-                    <div className="space-y-5 animate-in fade-in zoom-in-[0.98] duration-400">
-                        <div className="p-4 border border-border/60 rounded-xl bg-card/50 backdrop-blur-sm shadow-sm space-y-4 relative overflow-hidden">
-                            <div className="absolute top-0 left-0 w-1/2 h-[1px] bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
-                            
-                            <div className="flex justify-between items-end">
-                                <div className="space-y-1.5">
-                                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Target Engine</p>
-                                    <div className="flex items-center gap-1.5">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                                        <p className="text-sm font-semibold truncate max-w-[180px] text-foreground/90">{state.targetUrl}</p>
+                            <div style={{ marginBottom: 16 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                                    <div style={css.label}>Scan Modules</div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)', fontWeight: 500, background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: 4 }}>
+                                            {selected.length}/{AVAILABLE_PLUGINS.length}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSelected(selected.length === AVAILABLE_PLUGINS.length ? [] : AVAILABLE_PLUGINS.map(p => p.id))}
+                                            style={{
+                                                background: 'rgba(255,255,255,0.07)',
+                                                border: '1px solid rgba(255,255,255,0.12)',
+                                                borderRadius: 5,
+                                                cursor: 'pointer',
+                                                color: 'rgba(255,255,255,0.6)',
+                                                fontSize: 10,
+                                                fontWeight: 600,
+                                                padding: '3px 8px',
+                                                fontFamily: 'inherit',
+                                                transition: 'all 0.12s',
+                                            }}
+                                            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; e.currentTarget.style.color = '#fff' }}
+                                            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; e.currentTarget.style.color = 'rgba(255,255,255,0.6)' }}
+                                        >
+                                            {selected.length === AVAILABLE_PLUGINS.length ? 'Deselect all' : 'Select all'}
+                                        </button>
                                     </div>
                                 </div>
-                                <div className="text-right space-y-1">
-                                    <p className="text-2xl font-bold text-primary tabular-nums tracking-tight">
-                                        {Math.round(state.progress?.percent || 0)}<span className="text-sm text-primary/60 ml-0.5">%</span>
-                                    </p>
+
+                                {/* 2-col grid — compact rows */}
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+                                    {AVAILABLE_PLUGINS.map(plugin => {
+                                        const on = selected.includes(plugin.id)
+                                        return (
+                                            <button
+                                                key={plugin.id}
+                                                type="button"
+                                                onClick={() => toggle(plugin.id)}
+                                                style={{
+                                                    display: 'flex', alignItems: 'center', gap: 8,
+                                                    padding: '8px 10px', borderRadius: 7, cursor: 'pointer',
+                                                    background: on ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.03)',
+                                                    border: `1px solid ${on ? 'rgba(255,255,255,0.13)' : 'rgba(255,255,255,0.06)'}`,
+                                                    textAlign: 'left', transition: 'all 0.12s',
+                                                    fontFamily: 'inherit',
+                                                }}
+                                            >
+                                                {/* Custom checkbox */}
+                                                <span style={{
+                                                    width: 14, height: 14, borderRadius: 4, flexShrink: 0,
+                                                    background: on ? '#f4f4f5' : 'transparent',
+                                                    border: `1.5px solid ${on ? '#f4f4f5' : 'rgba(255,255,255,0.2)'}`,
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                    transition: 'all 0.12s',
+                                                }}>
+                                                    {on && (
+                                                        <svg width="8" height="6" viewBox="0 0 8 6" fill="none">
+                                                            <path d="M1 3l2 2 4-4" stroke="#111113" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                                        </svg>
+                                                    )}
+                                                </span>
+                                                <div style={{ minWidth: 0 }}>
+                                                    <div style={{ fontSize: 11, fontWeight: 600, color: on ? '#f4f4f5' : 'rgba(255,255,255,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                        {plugin.name}
+                                                    </div>
+                                                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.22)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                        {plugin.description}
+                                                    </div>
+                                                </div>
+                                            </button>
+                                        )
+                                    })}
                                 </div>
                             </div>
-                            
-                            <Progress value={state.progress?.percent || 0} className="h-2 rounded-full bg-primary/10 overflow-hidden" />
-                            
-                            <p className="text-xs text-muted-foreground/80 flex items-center gap-2">
-                                <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
-                                <span className="truncate">{state.progress?.message || 'Warming up scanner subsystem...'}</span>
-                            </p>
-                        </div>
 
-                        <div className="space-y-3">
-                            <div className="flex items-center justify-between px-1">
-                                <h3 className="text-xs font-semibold text-foreground/80">Real-time Telemetry</h3>
-                                {state.findings.length > 0 && (
-                                    <span className="text-[10px] text-muted-foreground animate-pulse">Live</span>
-                                )}
+                            <button
+                                type="submit"
+                                disabled={!url || selected.length === 0}
+                                style={{ ...css.btn, opacity: (!url || selected.length === 0) ? 0.25 : 1 }}
+                                onMouseEnter={e => { if (url && selected.length) e.currentTarget.style.opacity = '0.88' }}
+                                onMouseLeave={e => { if (url && selected.length) e.currentTarget.style.opacity = '1' }}
+                            >
+                                <Play size={12} fill="currentColor" />
+                                Start Scan
+                            </button>
+                        </form>
+                    )}
+
+                    {/* ════════ SCANNING ════════ */}
+                    {isScanning && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+                            {/* Progress card */}
+                            <div style={css.card}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                                    <div style={{ minWidth: 0, flex: 1, marginRight: 12 }}>
+                                        <div style={{ ...css.label, marginBottom: 4 }}>Target</div>
+                                        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {state.targetUrl}
+                                        </div>
+                                    </div>
+                                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                                        <span style={{ fontSize: 24, fontWeight: 800, color: '#fff', lineHeight: 1, letterSpacing: '-0.03em' }}>{Math.round(smoothPct)}</span>
+                                        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginLeft: 2 }}>%</span>
+                                    </div>
+                                </div>
+
+                                {/* Progress track */}
+                                <div style={{ height: 3, background: 'rgba(255,255,255,0.07)', borderRadius: 2, overflow: 'hidden', marginBottom: 10 }}>
+                                    <div style={{
+                                        height: '100%', width: `${smoothPct}%`,
+                                        background: 'linear-gradient(90deg, #3b82f6, #818cf8)',
+                                        borderRadius: 2, transition: 'width 0.1s linear',
+                                    }} />
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'rgba(255,255,255,0.3)', fontSize: 11 }}>
+                                    <Loader2 size={11} style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }} />
+                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {cleanMsg(state.progress?.message ?? 'Initializing...')}
+                                    </span>
+                                </div>
                             </div>
-                            
-                            <div className="space-y-2">
+
+                            {/* Live findings */}
+                            <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                    <div style={css.label}>Live Findings</div>
+                                    {state.findings.length > 0 && (
+                                        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)', fontWeight: 500 }}>
+                                            {state.findings.length} detected
+                                        </span>
+                                    )}
+                                </div>
+
                                 {state.findings.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center py-8 text-muted-foreground border border-dashed border-border/60 rounded-xl bg-background/50">
-                                        <Shield className="w-8 h-8 opacity-20 mb-3 stroke-1" />
-                                        <p className="text-xs font-medium">Monitoring system traffic...</p>
-                                        <p className="text-[10px] opacity-60 mt-1">No vulnerabilities detected yet.</p>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '12px 0', color: 'rgba(255,255,255,0.18)' }}>
+                                        <ShieldCheck size={14} />
+                                        <span style={{ fontSize: 11 }}>No findings yet</span>
                                     </div>
                                 ) : (
-                                    <div className="flex flex-col gap-2">
-                                        {state.findings.slice().reverse().slice(0, 5).map((finding, idx) => (
-                                            <div key={idx} className="flex flex-col gap-1.5 p-3 rounded-lg border border-border/50 bg-card hover:bg-muted/20 transition-colors shadow-sm text-xs animate-in slide-in-from-right-4">
-                                                <div className="flex items-center justify-between">
-                                                    <Badge variant="outline" className={`text-[9px] px-1.5 py-0 h-4 border uppercase tracking-wider font-bold ${severityColors[finding.severity] || severityColors.INFO}`}>
-                                                        {finding.severity}
-                                                    </Badge>
-                                                    <span className="text-[10px] font-medium text-muted-foreground bg-muted/50 px-1.5 rounded">{finding.plugin}</span>
-                                                </div>
-                                                <p className="font-medium text-foreground/90 truncate pr-2">{finding.title}</p>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                        {state.findings.slice().reverse().slice(0, 6).map((f, i) => (
+                                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0' }}>
+                                                <span style={{ width: 6, height: 6, borderRadius: '50%', background: SEV[f.severity].dot, flexShrink: 0 }} />
+                                                <span style={{ flex: 1, fontSize: 11, color: 'rgba(255,255,255,0.6)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                    {f.title}
+                                                </span>
+                                                <span style={{ fontSize: 9, fontWeight: 700, color: SEV[f.severity].label, flexShrink: 0, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                                                    {f.severity}
+                                                </span>
                                             </div>
                                         ))}
                                     </div>
                                 )}
                             </div>
-                        </div>
 
-                        <div className="pt-2">
-                            <Button 
-                                variant="outline" 
-                                className="w-full gap-2 rounded-xl text-muted-foreground hover:text-red-500 hover:border-red-500/30 hover:bg-red-500/5 transition-all" 
-                                onClick={stopScan}
+                            {/* Cancel */}
+                            <button
+                                type="button"
+                                onClick={handleHome}
+                                style={{
+                                    background: 'rgba(239,68,68,0.07)',
+                                    border: '1px solid rgba(239,68,68,0.18)',
+                                    borderRadius: 7,
+                                    cursor: 'pointer',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                    color: 'rgba(239,68,68,0.6)',
+                                    fontSize: 11, fontWeight: 600,
+                                    padding: '7px 14px',
+                                    fontFamily: 'inherit',
+                                    transition: 'all 0.15s',
+                                    alignSelf: 'flex-start',
+                                }}
+                                onMouseEnter={e => {
+                                    e.currentTarget.style.background = 'rgba(239,68,68,0.13)'
+                                    e.currentTarget.style.borderColor = 'rgba(239,68,68,0.35)'
+                                    e.currentTarget.style.color = '#f87171'
+                                }}
+                                onMouseLeave={e => {
+                                    e.currentTarget.style.background = 'rgba(239,68,68,0.07)'
+                                    e.currentTarget.style.borderColor = 'rgba(239,68,68,0.18)'
+                                    e.currentTarget.style.color = 'rgba(239,68,68,0.6)'
+                                }}
                             >
-                                <Square className="w-3.5 h-3.5" /> Terminate Operation
-                            </Button>
+                                <Square size={10} fill="currentColor" />
+                                Cancel Scan
+                            </button>
                         </div>
-                    </div>
-                )}
+                    )}
 
-                {/* --- 스캔 완료 (completed) --- */}
-                {isCompleted && (
-                    <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500 pb-2">
-                        <div className="text-center py-6 space-y-3 relative">
-                            <div className="absolute inset-0 bg-green-500/5 rounded-3xl blur-xl" />
-                            <div className="w-16 h-16 bg-green-500/10 text-green-500 rounded-full flex items-center justify-center mx-auto mb-4 relative shadow-inner border border-green-500/20">
-                                <CheckCircle2 className="w-8 h-8" />
-                            </div>
-                            <h2 className="text-xl font-bold tracking-tight">Scan Completed</h2>
-                            <p className="text-xs text-muted-foreground truncate px-4 max-w-[300px] mx-auto bg-muted/30 py-1 rounded-full">{state.targetUrl}</p>
-                        </div>
+                    {/* ════════ COMPLETED ════════ */}
+                    {isCompleted && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-                        <div className="grid grid-cols-2 gap-3">
-                            <div className="p-4 border rounded-xl border-border/60 bg-card text-center space-y-1.5 shadow-sm hover:shadow-md transition-shadow">
-                                <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Total Findings</p>
-                                <p className={`text-3xl font-extrabold ${state.summary?.totalFindings ? 'text-red-500' : 'text-foreground'}`}>
-                                    {state.summary?.totalFindings || 0}
-                                </p>
+                            {/* Result hero */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '4px 0' }}>
+                                <div style={{
+                                    width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    background: !hasFindings ? 'rgba(34,197,94,0.1)' :
+                                        (state.summary?.severityCounts.CRITICAL ?? 0) > 0 ? 'rgba(239,68,68,0.1)' : 'rgba(234,179,8,0.1)',
+                                    border: `1px solid ${!hasFindings ? 'rgba(34,197,94,0.2)' :
+                                        (state.summary?.severityCounts.CRITICAL ?? 0) > 0 ? 'rgba(239,68,68,0.2)' : 'rgba(234,179,8,0.2)'}`,
+                                    color: !hasFindings ? '#4ade80' :
+                                        (state.summary?.severityCounts.CRITICAL ?? 0) > 0 ? '#f87171' : '#facc15',
+                                }}>
+                                    {hasFindings ? <ShieldAlert size={18} /> : <ShieldCheck size={18} />}
+                                </div>
+                                <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', letterSpacing: '-0.01em' }}>
+                                        {hasFindings ? `${total} Issue${total > 1 ? 's' : ''} Found` : 'All Clear'}
+                                    </div>
+                                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {state.targetUrl}
+                                    </div>
+                                </div>
                             </div>
-                            <div className="p-4 border rounded-xl border-border/60 bg-card text-center space-y-1.5 shadow-sm hover:shadow-md transition-shadow">
-                                <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Duration</p>
-                                <p className="text-3xl font-extrabold tracking-tight">
-                                    {state.summary?.durationSeconds.toFixed(1)}<span className="text-sm text-muted-foreground ml-1">sec</span>
-                                </p>
-                            </div>
-                        </div>
 
-                        <div className="space-y-3 p-4 border border-border/50 rounded-xl bg-muted/10">
-                            <h3 className="text-xs font-semibold text-foreground/80">Severity Breakdown</h3>
-                            <div className="flex flex-wrap gap-2">
-                                {Object.entries(state.summary?.severityCounts || {}).map(([sev, count]) => {
-                                    if (count === 0) return null;
-                                    const s = sev as Severity;
-                                    const colorMap = {
-                                        CRITICAL: 'bg-red-500 text-white border-red-600',
-                                        HIGH: 'bg-orange-500 text-white border-orange-600',
-                                        MEDIUM: 'bg-yellow-500 text-white border-yellow-600',
-                                        LOW: 'bg-blue-500 text-white border-blue-600',
-                                        INFO: 'bg-zinc-400 text-white border-zinc-500'
-                                    }
-                                    return (
-                                        <Badge key={sev} variant="outline" className={`flex gap-1.5 py-1 px-2.5 rounded-lg shadow-sm font-medium ${colorMap[s] || colorMap.INFO}`}>
-                                            <span className="text-[10px]">{sev}</span>
-                                            <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded-md min-w-[20px] text-center">{count}</span>
-                                        </Badge>
-                                    )
-                                })}
-                                {Object.values(state.summary?.severityCounts || {}).every(c => c === 0) && (
-                                    <p className="text-xs text-muted-foreground w-full text-center py-2">System is secure.</p>
+                            <div style={css.divider} />
+
+                            {/* Stats */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                                {[
+                                    { label: 'Findings', value: String(total), color: hasFindings ? '#f87171' : '#fff' },
+                                    { label: 'Duration', value: `${state.summary?.durationSeconds.toFixed(1)}s`, color: '#fff' },
+                                ].map(({ label, value, color }) => (
+                                    <div key={label} style={{ ...css.card, textAlign: 'center', padding: '10px 8px' }}>
+                                        <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.25)', marginBottom: 5 }}>{label}</div>
+                                        <div style={{ fontSize: 18, fontWeight: 800, color, letterSpacing: '-0.02em', lineHeight: 1 }}>{value}</div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Severity breakdown */}
+                            {hasFindings && (
+                                <div style={{ ...css.card }}>
+                                    <div style={{ ...css.label, marginBottom: 10 }}>Breakdown</div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                                        {SEV_ORDER.map(sev => {
+                                            const c = state.summary?.severityCounts[sev] ?? 0
+                                            if (!c) return null
+                                            return (
+                                                <div key={sev} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                    <span style={{ width: 52, textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: SEV[sev].label, flexShrink: 0 }}>
+                                                        {sev}
+                                                    </span>
+                                                    <div style={{ flex: 1, height: 3, background: 'rgba(255,255,255,0.07)', borderRadius: 2, overflow: 'hidden' }}>
+                                                        <div style={{
+                                                            height: '100%', width: `${Math.round((c / maxCount) * 100)}%`,
+                                                            background: SEV[sev].bar, borderRadius: 2,
+                                                            transition: 'width 0.7s ease',
+                                                        }} />
+                                                    </div>
+                                                    <span style={{ width: 14, textAlign: 'right', fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.4)', flexShrink: 0 }}>{c}</span>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Findings accordion */}
+                            {hasFindings && (
+                                <div style={{ borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', overflow: 'hidden' }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowFindings(v => !v)}
+                                        style={{
+                                            width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                            padding: '9px 12px', background: 'rgba(255,255,255,0.04)', border: 'none', cursor: 'pointer',
+                                            color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
+                                        }}
+                                    >
+                                        <span>View all findings</span>
+                                        {showFindings ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                                    </button>
+                                    {showFindings && (
+                                        <div style={{ maxHeight: 150, overflowY: 'auto', background: 'rgba(0,0,0,0.15)' }}>
+                                            {state.findings.map((f, i) => (
+                                                <div key={i} style={{
+                                                    display: 'flex', alignItems: 'center', gap: 8,
+                                                    padding: '7px 12px',
+                                                    borderTop: i > 0 ? '1px solid rgba(255,255,255,0.04)' : undefined,
+                                                }}>
+                                                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: SEV[f.severity].dot, flexShrink: 0 }} />
+                                                    <span style={{ flex: 1, fontSize: 11, color: 'rgba(255,255,255,0.55)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                        {f.title}
+                                                    </span>
+                                                    <span style={{ fontSize: 9, fontWeight: 700, color: SEV[f.severity].label, flexShrink: 0, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                                                        {f.severity}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Export */}
+                            <div style={{ opacity: hasFindings ? 1 : 0.25, pointerEvents: hasFindings ? 'auto' : 'none' }}>
+                                <div style={{ ...css.label, marginBottom: 7 }}>Export</div>
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                    {[
+                                        { label: 'HTML Report', fn: () => exportFindingsToHtml(exportData()) },
+                                        { label: 'JSON', fn: () => exportFindingsToJson(exportData()) },
+                                    ].map(({ label, fn }) => (
+                                        <button
+                                            key={label}
+                                            type="button"
+                                            onClick={fn}
+                                            style={{
+                                                flex: 1, height: 34, borderRadius: 7, cursor: 'pointer',
+                                                background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
+                                                color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: 600,
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                                                transition: 'all 0.12s', fontFamily: 'inherit',
+                                            }}
+                                            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.09)'; e.currentTarget.style.color = 'rgba(255,255,255,0.85)' }}
+                                            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = 'rgba(255,255,255,0.5)' }}
+                                        >
+                                            <Download size={12} />
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+                                {!hasFindings && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6, color: 'rgba(255,255,255,0.2)', fontSize: 10 }}>
+                                        <Info size={11} />
+                                        No findings to export
+                                    </div>
                                 )}
                             </div>
-                        </div>
 
-                        <div className="pt-2">
-                            <Button 
-                                variant="default"
-                                size="lg"
-                                className="w-full rounded-xl font-bold shadow-md"
-                                onClick={() => window.location.reload()}
+                            {/* New scan */}
+                            <button
+                                type="button"
+                                onClick={handleHome}
+                                style={css.btn}
+                                onMouseEnter={e => e.currentTarget.style.opacity = '0.88'}
+                                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
                             >
-                                Initiate New Scan
-                            </Button>
+                                <House size={13} />
+                                New Scan
+                            </button>
                         </div>
-                    </div>
-                )}
+                    )}
 
+                </div>
             </ScrollArea>
+
+            <style>{`
+                @keyframes spin { to { transform: rotate(360deg); } }
+                @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+            `}</style>
         </div>
     )
 }

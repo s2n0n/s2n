@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+import os
+with open('/tmp/chrome_test.log', 'a') as f:
+    f.write('Native host process initiated by Chrome.\n')
+
 """
 S2N Scanner - Native Messaging Host
 ====================================
@@ -12,6 +16,8 @@ stdin/stdout으로 통신합니다.
 """
 
 import json
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module='urllib3')
 import struct
 import sys
 import os
