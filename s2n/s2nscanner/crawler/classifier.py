@@ -1,7 +1,7 @@
 """
 PageClassifier — HTML 폼 자동 분류 모듈
 - 페이지 내 폼을 분석해 LOGIN, TEXT_INPUT, FILE_UPLOAD, COMMAND, SEARCH, GENERIC 등으로 분류
-- 재사용: helper.py의 Form/FormParser, csrf_constants.py의 CSRF_TOKEN_KEYWORDS 등
+- 재사용: helper.py의 Form/FormParser, constants.py의 공용 상수
 """
 
 from __future__ import annotations
@@ -13,10 +13,15 @@ from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 from s2n.s2nscanner.plugins.helper import Form, FormParser
-from s2n.s2nscanner.plugins.csrf.csrf_constants import (
+from s2n.s2nscanner.constants import (
     CSRF_TOKEN_KEYWORDS,
     META_CSRF_NAMES,
     JS_TOKEN_PATTERN,
+    FIELD_TYPE_HIDDEN,
+    FIELD_TYPE_PASSWORD,
+    FIELD_TYPE_FILE,
+    FIELD_TYPE_TEXTAREA,
+    INPUT_FIELD_TYPES,
 )
 from s2n.s2nscanner.logger import get_logger
 
@@ -162,17 +167,17 @@ class PageClassifier:
             inp_type = (inp.get("type") or "text").lower()
             inp_name = (inp.get("name") or "").lower()
 
-            if inp_type == "password":
+            if inp_type == FIELD_TYPE_PASSWORD:
                 has_password = True
-            elif inp_type == "file":
+            elif inp_type == FIELD_TYPE_FILE:
                 has_file = True
-            elif inp_type in ("text", "email", "url", "number", "tel"):
+            elif inp_type in INPUT_FIELD_TYPES:
                 has_text_input = True
                 if inp_name in _COMMAND_KEYWORDS:
                     has_command_hint = True
                 if inp_name in _SEARCH_KEYWORDS:
                     has_search_hint = True
-            elif inp_type == "textarea" or inp.get("tag") == "textarea":
+            elif inp_type == FIELD_TYPE_TEXTAREA or inp.get("tag") == FIELD_TYPE_TEXTAREA:
                 has_text_input = True
                 if inp_name in _COMMAND_KEYWORDS:
                     has_command_hint = True
@@ -201,7 +206,7 @@ class PageClassifier:
         for inp in form.inputs:
             inp_type = (inp.get("type") or "").lower()
             inp_name = (inp.get("name") or "").lower()
-            if inp_type == "hidden" and inp_name:
+            if inp_type == FIELD_TYPE_HIDDEN and inp_name:
                 for kw in CSRF_TOKEN_KEYWORDS:
                     if kw in inp_name:
                         return {"name": inp.get("name", ""), "value": inp.get("value", "")}
@@ -227,7 +232,7 @@ class PageClassifier:
         value = input_attrs.get("value", "")
 
         is_csrf = False
-        if field_type == "hidden" and name:
+        if field_type == FIELD_TYPE_HIDDEN and name:
             name_lower = name.lower()
             for kw in CSRF_TOKEN_KEYWORDS:
                 if kw in name_lower:

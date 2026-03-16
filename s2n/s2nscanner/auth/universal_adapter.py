@@ -15,6 +15,16 @@ from urllib.parse import urljoin
 from requests import Response
 
 from s2n.s2nscanner.clients.http_client import HttpClient
+from s2n.s2nscanner.constants import (
+    AUTH_TIMEOUT,
+    AUTH_POST_TIMEOUT,
+    FIELD_TYPE_HIDDEN,
+    FIELD_TYPE_PASSWORD,
+    FIELD_TYPE_SUBMIT,
+    FIELD_TYPE_FILE,
+    FIELD_TYPE_TEXT,
+    FIELD_TYPE_EMAIL,
+)
 from s2n.s2nscanner.crawler.classifier import (
     ClassifiedForm,
     FormType,
@@ -108,7 +118,7 @@ class UniversalAuthAdapter:
 
     def is_authenticated(self) -> bool:
         """현재 세션이 인증 상태인지 확인."""
-        resp = self._client.get(self.base_url, timeout=5)
+        resp = self._client.get(self.base_url, timeout=AUTH_TIMEOUT)
         text = resp.text or ""
         if re.search(r'(logout|sign.?out|로그아웃)', text, re.I):
             return True
@@ -146,7 +156,7 @@ class UniversalAuthAdapter:
             return self._login_url
 
         # 2) 대상 URL 자체가 로그인 페이지인지 확인
-        resp = self._client.get(self.base_url, timeout=5)
+        resp = self._client.get(self.base_url, timeout=AUTH_TIMEOUT)
         base_html = resp.text or ""
         page = self._classifier.classify_page(self.base_url, base_html)
         if page.has_login_form:
@@ -155,7 +165,7 @@ class UniversalAuthAdapter:
         # 3) 공통 로그인 경로 시도
         for path in _COMMON_LOGIN_PATHS:
             test_url = f"{self.base_url}{path}"
-            resp = self._client.get(test_url, timeout=5)
+            resp = self._client.get(test_url, timeout=AUTH_TIMEOUT)
             if resp.status_code >= 400:
                 continue
             html = resp.text or ""
@@ -167,7 +177,7 @@ class UniversalAuthAdapter:
         # 4) base_url 페이지의 링크에서 login 키워드 찾기 (step 2의 HTML 재사용)
         for m in re.finditer(r'href=["\']([^"\']*login[^"\']*)["\']', base_html, re.I):
             candidate = urljoin(self.base_url, m.group(1))
-            r2 = self._client.get(candidate, timeout=5)
+            r2 = self._client.get(candidate, timeout=AUTH_TIMEOUT)
             page = self._classifier.classify_page(candidate, r2.text or "")
             if page.has_login_form:
                 return candidate
@@ -176,7 +186,7 @@ class UniversalAuthAdapter:
 
     def _analyze_login_form(self, url: str) -> Optional[ClassifiedForm]:
         """지정 URL에서 LOGIN 타입 폼을 탐지."""
-        resp = self._client.get(url, timeout=5)
+        resp = self._client.get(url, timeout=AUTH_TIMEOUT)
         html = resp.text or ""
 
         page = self._classifier.classify_page(url, html)
@@ -192,7 +202,7 @@ class UniversalAuthAdapter:
         data: Dict[str, str] = {}
 
         # CSRF 토큰 재추출 (폼 페이지를 새로 가져와 최신 토큰 확보)
-        fresh_resp = self._client.get(form.url, timeout=5)
+        fresh_resp = self._client.get(form.url, timeout=AUTH_TIMEOUT)
         fresh_html = fresh_resp.text or ""
         fresh_page = self._classifier.classify_page(form.url, fresh_html)
         for cf in fresh_page.forms:
@@ -202,16 +212,16 @@ class UniversalAuthAdapter:
 
         # hidden 필드 (CSRF 토큰 포함) 먼저 채우기
         for name, fi in form.fields.items():
-            if fi.field_type == "hidden":
+            if fi.field_type == FIELD_TYPE_HIDDEN:
                 data[name] = fi.value
 
         # username/password 필드 자동 매핑
         username_field = None
         password_field = None
         for name, fi in form.fields.items():
-            if fi.field_type == "password":
+            if fi.field_type == FIELD_TYPE_PASSWORD:
                 password_field = name
-            elif fi.field_type in ("text", "email") and not username_field:
+            elif fi.field_type in (FIELD_TYPE_TEXT, FIELD_TYPE_EMAIL) and not username_field:
                 username_field = name
 
         if not password_field:
@@ -221,7 +231,7 @@ class UniversalAuthAdapter:
         # username 필드를 못 찾았으면 폼의 첫 번째 text 계열 필드 사용
         if not username_field:
             for name, fi in form.fields.items():
-                if fi.field_type not in ("hidden", "password", "submit", "file"):
+                if fi.field_type not in (FIELD_TYPE_HIDDEN, FIELD_TYPE_PASSWORD, FIELD_TYPE_SUBMIT, FIELD_TYPE_FILE):
                     username_field = name
                     break
 
@@ -231,14 +241,14 @@ class UniversalAuthAdapter:
 
         # submit 버튼 값이 있으면 포함
         for name, fi in form.fields.items():
-            if fi.field_type == "submit" and fi.value:
+            if fi.field_type == FIELD_TYPE_SUBMIT and fi.value:
                 data[name] = fi.value
 
         # 로그인 전 쿠키 스냅샷
         pre_cookies = dict(self._client.s.cookies.get_dict())
 
         # POST 요청
-        resp = self._client.post(form.action_url, data=data, timeout=10)
+        resp = self._client.post(form.action_url, data=data, timeout=AUTH_POST_TIMEOUT)
 
         return self._check_login_success(pre_cookies, resp)
 

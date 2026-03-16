@@ -3,22 +3,16 @@ import re
 import urllib.parse
 from collections import deque
 from typing import List
+from s2n.s2nscanner.constants import LINK_TAG_ATTRS
 from s2n.s2nscanner.logger import get_logger
 
 logger = get_logger("crawler")
-
-# 링크 추출 대상 태그/속성 쌍
-_LINK_TAG_ATTRS = [
-    ("a", "href"), ("form", "action"),
-    ("script", "src"), ("iframe", "src"),
-    ("link", "href"),
-]
 
 
 def extract_same_origin_links(html: str, page_url: str, base_netloc: str) -> List[str]:
     """HTML에서 같은 오리진의 링크를 추출해 절대 URL 리스트로 반환."""
     links: List[str] = []
-    for tag, attr in _LINK_TAG_ATTRS:
+    for tag, attr in LINK_TAG_ATTRS:
         for m in re.finditer(fr"<{tag}[^>]+{attr}=['\"]([^'\"]+)['\"]", html, re.I):
             link = m.group(1)
             if not link:
