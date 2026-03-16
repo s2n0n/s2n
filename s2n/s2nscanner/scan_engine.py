@@ -180,7 +180,36 @@ class Scanner:
         if self.auth_adapter and not self.defer_authentication:
             self._ensure_authenticated()
 
+        # smart_crawl 연동 — SiteMap 생성 후 컨텍스트에 첨부
+        try:
+            from s2n.s2nscanner.crawler.smart_crawler import smart_crawl
+
+            crawl_depth = getattr(self.config.scanner_config, "crawl_depth", 2)
+            sitemap = smart_crawl(
+                self.config.target_url,
+                self.http_client or self.scan_context.http_client,
+                depth=crawl_depth,
+            )
+            setattr(self.scan_context, "sitemap", sitemap)
+            self.logger.info(
+                "SiteMap built: %d pages, %d URLs",
+                len(sitemap.pages),
+                len(sitemap.all_urls),
+            )
+        except Exception:
+            self.logger.warning("smart_crawl failed, proceeding without SiteMap", exc_info=True)
+
         plugins = self.discover_plugins()
+
+        # 플러그인이 target_form_types를 선언하면 SiteMap에 동적 등록
+        sitemap = getattr(self.scan_context, "sitemap", None)
+        if sitemap:
+            for plugin in plugins:
+                form_types = getattr(plugin, "target_form_types", None)
+                if form_types is not None:
+                    identifier = self._get_plugin_identifier(plugin)
+                    sitemap.register_plugin(identifier, form_types)
+
         total_plugins = len(plugins)
         if total_plugins:
             self._emit_progress(0, total_plugins, "🧭 Preparing Scan \n 스캔 준비 중")
@@ -421,11 +450,19 @@ class Scanner:
 
         self.logger.debug(f"🚀 Running plugin '{plugin_name}' with config: {plugin_config}")
 
+        # SiteMap 기반 target_urls 설정
+        target_urls = [self.config.target_url]
+        sitemap = getattr(self.scan_context, "sitemap", None)
+        if sitemap:
+            sm_urls = sitemap.get_urls()
+            if sm_urls:
+                target_urls = sm_urls
+
         plugin_context = PluginContext(
             plugin_name=plugin_name,
             scan_context=self.scan_context,
             plugin_config=plugin_config,
-            target_urls=[self.config.target_url],
+            target_urls=target_urls,
             logger=plugin_logger,
         )
 

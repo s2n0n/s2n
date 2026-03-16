@@ -22,6 +22,8 @@ def cliargs_to_scanrequest(args: CLIArguments) -> ScanRequest:
         upper_auth = args.auth.upper()
         if upper_auth == "DVWA":
             auth_type = AuthType.CUSTOM
+        elif upper_auth == "AUTO":
+            auth_type = AuthType.AUTO
         else:
             try:
                 auth_type = AuthType(upper_auth)
