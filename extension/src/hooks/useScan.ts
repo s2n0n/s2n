@@ -2,30 +2,19 @@ import { useState, useEffect } from 'react'
 import { INITIAL_SCAN_STATE } from '@/types/scan'
 import type { ScanState } from '@/types/scan'
 
-function deduplicateFindings(state: ScanState): ScanState {
-    const seen = new Set<string>()
-    const findings = state.findings.filter((f) => {
-        const key = f.id ?? `${f.title}__${f.url}__${f.severity}`
-        if (seen.has(key)) return false
-        seen.add(key)
-        return true
-    })
-    return { ...state, findings }
-}
-
 export function useScan() {
     const [state, setState] = useState<ScanState>(INITIAL_SCAN_STATE)
 
     useEffect(() => {
         chrome.runtime.sendMessage({ type: 'get_scan_state' }, (response: ScanState) => {
             if (response) {
-                setState(deduplicateFindings(response))
+                setState(response)
             }
         })
 
         const handleMessage = (message: any) => {
             if (message.type === 'state_update') {
-                setState(deduplicateFindings(message.state))
+                setState(message.state)
             }
         }
 

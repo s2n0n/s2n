@@ -44,9 +44,9 @@ export function FindingTable({ findings }: FindingTableProps) {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                        {findings.map((f, i) => (
+                        {findings.map((f) => (
                             <tr 
-                                key={f.id || i}
+                                key={f.id ?? `${f.title}__${f.url ?? ''}__${f.severity}__${f.parameter ?? ''}`}
                                 onClick={() => setSelectedFinding(f)}
                                 className={`hover:bg-accent/50 cursor-pointer transition-colors ${selectedFinding?.id === f.id ? 'bg-accent/50' : ''}`}
                             >

@@ -5,37 +5,50 @@
 import type { ScanHistoryItem } from '@/types/scan'
 
 /**
+ * HTML 특수문자 이스케이프 — XSS 방지
+ */
+function esc(s: string | undefined | null): string {
+    if (!s) return ''
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+}
+
+/**
  * 통계 데이터를 포함한 예쁜 HTML 리포트 생성
  */
 export function generateHtmlReport(scan: ScanHistoryItem): string {
     const findingsListHtml = scan.findings.map(finding => `
         <div class="finding-card border rounded-lg p-4 mb-4 shadow-sm bg-white break-words">
             <div class="flex justify-between items-start mb-2">
-                <h3 class="text-lg font-semibold text-gray-900">${finding.title}</h3>
+                <h3 class="text-lg font-semibold text-gray-900">${esc(finding.title)}</h3>
                 <span class="px-2 py-1 text-xs font-bold rounded-full severity-${finding.severity.toLowerCase()} text-white">
-                    ${finding.severity}
+                    ${esc(finding.severity)}
                 </span>
             </div>
-            <div class="text-sm text-gray-600 mb-4 whitespace-pre-wrap">${finding.description}</div>
+            <div class="text-sm text-gray-600 mb-4 whitespace-pre-wrap">${esc(finding.description)}</div>
             
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm bg-gray-50 p-3 rounded-md">
-                ${finding.url ? `<div><strong>URL:</strong> <span class="text-blue-600">${finding.url}</span></div>` : ''}
-                ${finding.method ? `<div><strong>Method:</strong> ${finding.method}</div>` : ''}
-                ${finding.plugin ? `<div><strong>Plugin:</strong> ${finding.plugin}</div>` : ''}
-                ${finding.parameter ? `<div><strong>Parameter:</strong> ${finding.parameter}</div>` : ''}
-                ${finding.cweId ? `<div><strong>CWE:</strong> ${finding.cweId}</div>` : ''}
+                ${finding.url ? `<div><strong>URL:</strong> <span class="text-blue-600">${esc(finding.url)}</span></div>` : ''}
+                ${finding.method ? `<div><strong>Method:</strong> ${esc(finding.method)}</div>` : ''}
+                ${finding.plugin ? `<div><strong>Plugin:</strong> ${esc(finding.plugin)}</div>` : ''}
+                ${finding.parameter ? `<div><strong>Parameter:</strong> ${esc(finding.parameter)}</div>` : ''}
+                ${finding.cweId ? `<div><strong>CWE:</strong> ${esc(finding.cweId)}</div>` : ''}
                 ${finding.cvssScore !== undefined ? `<div><strong>CVSS Score:</strong> ${finding.cvssScore}</div>` : ''}
             </div>
 
             ${finding.evidence ? `
                 <div class="mt-4">
                     <strong class="text-sm">Evidence:</strong>
-                    <pre class="bg-gray-800 text-gray-100 p-3 rounded-md mt-1 overflow-x-auto text-xs">${finding.evidence}</pre>
+                    <pre class="bg-gray-800 text-gray-100 p-3 rounded-md mt-1 overflow-x-auto text-xs">${esc(finding.evidence)}</pre>
                 </div>
             ` : ''}
              ${finding.reference ? `
                 <div class="mt-4 text-sm">
-                    <strong>Reference:</strong> <a href="${finding.reference}" target="_blank" class="text-blue-500 hover:underline">${finding.reference}</a>
+                    <strong>Reference:</strong> <a href="${esc(finding.reference)}" target="_blank" class="text-blue-500 hover:underline">${esc(finding.reference)}</a>
                 </div>
             ` : ''}
         </div>
@@ -68,8 +81,8 @@ export function generateHtmlReport(scan: ScanHistoryItem): string {
             </div>
             <div class="text-right">
                 <div class="text-sm font-semibold text-gray-600">Target</div>
-                <div class="text-lg font-bold text-blue-700 break-all">${scan.targetUrl}</div>
-                <div class="text-sm text-gray-500 mt-1">Status: ${scan.status.toUpperCase()}</div>
+                <div class="text-lg font-bold text-blue-700 break-all">${esc(scan.targetUrl)}</div>
+                <div class="text-sm text-gray-500 mt-1">Status: ${esc(scan.status.toUpperCase())}</div>
             </div>
         </header>
 

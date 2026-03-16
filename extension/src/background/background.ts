@@ -13,6 +13,14 @@ let nativePort: chrome.runtime.Port | null = null
 // finding id 추적용 Set — 스캔 시작 시 초기화
 let seenFindingIds = new Set<string>()
 
+// SW 재시작 시 기존 findings가 있다면 Set 복구 (상태 유지 대비)
+if (currentScanState.findings.length > 0) {
+    currentScanState.findings.forEach(f => {
+        const key = f.id ?? `${f.title}__${f.url ?? ''}__${f.severity}__${f.parameter ?? ''}`
+        seenFindingIds.add(key)
+    })
+}
+
 function broadcastStateUpdate() {
     chrome.runtime.sendMessage({
         type: 'state_update',
@@ -46,8 +54,10 @@ function handleNativeMessage(response: any) {
 
         case 'scan_finding':
             const finding = data as Finding
-            // ✅ 중복 finding 방지: id 또는 title+url+severity 키로 체크
-            const findingKey = finding.id ?? `${finding.title}__${finding.url}__${finding.severity}`
+            // ✅ 중복 finding 방지: id 또는 상세 필드 조합 키 사용 (url/parameter null 대처)
+            const findingKey = finding.id ?? 
+                `${finding.title}__${finding.url ?? ''}__${finding.severity}__${finding.parameter ?? ''}`
+            
             if (!seenFindingIds.has(findingKey)) {
                 seenFindingIds.add(findingKey)
                 currentScanState.findings.push(finding)
