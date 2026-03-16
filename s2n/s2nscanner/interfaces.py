@@ -25,6 +25,7 @@ class AuthType(str, Enum):
     API_KEY = "API_KEY"
     COOKIE = "COOKIE"
     CUSTOM = "CUSTOM"
+    AUTO = "AUTO"
 
 
 class OutputFormat(str, Enum):
