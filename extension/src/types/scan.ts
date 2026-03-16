@@ -65,14 +65,14 @@ export interface ScanState {
 
 /** 사용 가능한 플러그인 목록 */
 export const AVAILABLE_PLUGINS = [
-    { id: 'xss', name: 'XSS', description: '크로스 사이트 스크립팅' },
-    { id: 'sqlinjection', name: 'SQL Injection', description: 'SQL 인젝션' },
-    { id: 'csrf', name: 'CSRF', description: '크로스 사이트 요청 위조' },
-    { id: 'brute_force', name: 'Brute Force', description: '브루트포스 공격' },
-    { id: 'file_upload', name: 'File Upload', description: '파일 업로드 취약점' },
-    { id: 'oscommand', name: 'OS Command', description: 'OS 명령어 인젝션' },
-    { id: 'soft_brute_force', name: 'Soft Brute Force', description: '소프트 브루트포스' },
-] as const
+    { id: 'xss', name: 'XSS', description: 'Cross-site scripting' },
+    { id: 'sqlinjection', name: 'SQL Injection', description: 'SQL injection attacks' },
+    { id: 'csrf', name: 'CSRF', description: 'Request forgery' },
+    { id: 'brute_force', name: 'Brute Force', description: 'Password enumeration' },
+    { id: 'file_upload', name: 'File Upload', description: 'Malicious file upload' },
+    { id: 'oscommand', name: 'OS Command', description: 'Command injection' },
+    { id: 'soft_brute_force', name: 'Soft Brute Force', description: 'Rate-limited login attacks' },
+]
 
 /** 초기 스캔 상태 */
 export const INITIAL_SCAN_STATE: ScanState = {

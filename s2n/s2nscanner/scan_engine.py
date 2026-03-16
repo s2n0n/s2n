@@ -233,9 +233,7 @@ class Scanner:
 
                 # findings 접근 전 유효성 체크
                 findings = getattr(result, "findings", None)
-                if findings is not None:
-                    self._emit_findings(findings)
-                else:
+                if findings is None:
                     self.logger.warning(f"⚠️ Plugin '{plugin_name}' returned result without 'findings' field.")
 
             except Exception as e:
