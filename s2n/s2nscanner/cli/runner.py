@@ -14,6 +14,7 @@ from s2n.s2nscanner.auth.dvwa_adapter import DVWAAdapter
 from s2n.s2nscanner.scan_engine import Scanner
 from s2n.s2nscanner.report import output_report, OutputFormat
 from s2n.s2nscanner.logger import init_logger
+from s2n.s2nscanner.plugins.discovery import discover_plugins
 
 import os
 from rich.console import Console
@@ -36,10 +37,10 @@ is_ci = os.getenv("CI", "").lower() in ("true", "1", "yes")
 console = Console(force_terminal=True, force_interactive=not is_ci)
 
 
-# CLI Root
-@click.group()
-def cli():
-    ascii_logo = r"""
+# S2N 전용 Click Group (Help 출력 시 로고와 예시를 항상 포함하기 위함)
+class S2NGroup(click.Group):
+    def format_help(self, ctx, formatter):
+        ascii_logo = r"""
     (`-').->        <-. (`-')_
     ( OO)_             \( OO) )
     (_)--\_)  .----. ,--./ ,--/
@@ -51,10 +52,27 @@ def cli():
 
     S2N Web Vulnerability Scanner CLI
     """
+        colored_logo = click.style(ascii_logo, fg="blue", bold=True)
+        click.echo(colored_logo)
+        click.echo("🔍 Welcome to S2N Scanner! Your plugin-based web vulnerability scanner.\n")
+        
+        click.echo(click.style("[Usage Examples]", fg="cyan", bold=True, underline=True))
+        click.echo("  s2n scan -u http://example.com                 # Scan with all default plugins")
+        click.echo("  s2n scan -u http://example.com --all           # Explicitly run all plugins")
+        click.echo("  s2n scan -u http://example.com -p brute_force -y # Run brute force, accepting risks")
+        click.echo("  s2n list-plugins                               # List all available plugins")
+        click.echo("  s2n inspect-plugin xss                         # View details of a specific plugin")
+        click.echo("  s2n --help                                    # Show this help message\n")
+        
+        # 기본 Click 도움말 출력
+        super().format_help(ctx, formatter)
 
-    colored_logo = click.style(ascii_logo, fg="blue", bold=True)
-    click.echo(colored_logo)
-    click.echo("🔍 Welcome to S2N Scanner! Use --help to explore commands.\n")
+
+# CLI Root
+@click.group(cls=S2NGroup)
+def cli():
+    # S2NGroup에서 Help 처리를 하므로 여기서는 pass
+    pass
 
 
 # scan 명령어
@@ -64,7 +82,9 @@ def cli():
     "-p",
     "--plugin",
     multiple=True,
-    help="Plugins to use (can be used multiple times). If omitted or if --all is used, all default plugins will run. \n사용할 플러그인 이름. 생략하거나 --all 사용 시 전체 플러그인이 실행됩니다. \n\n[options: csrf, sqlinjection, file_upload, oscommand, xss, brute_force, soft_brute_force]",
+    help="Plugins to use (can be used multiple times). If omitted or if --all is used, all default plugins will run. \n"
+         "사용할 플러그인 이름. 생략하거나 --all 사용 시 전체 플러그인이 실행됩니다. \n\n"
+         f"[available: {', '.join([p['id'] for p in discover_plugins()]) or 'none'}]",
 )
 @click.option(
     "--all", "run_all", is_flag=True, help="Run all default plugins / 모든 기본 플러그인 실행"
@@ -97,6 +117,7 @@ def scan(
     plugin,
     run_all,
     auth,
+    accept_risk,
     username,
     password,
     output,
@@ -104,8 +125,8 @@ def scan(
     crawler_depth,
     verbose,
     log_file,
-    accept_risk,
 ):
+    """Run a vulnerability scan / 취약점 스캔 실행"""
     logger = init_logger(verbose, log_file)
     logger.info("Starting scan for %s", url)
 
@@ -304,6 +325,64 @@ def scan(
         logger.info("Scan report successfully generated.")
     except Exception as exc:
         logger.exception("Failed to output report: %s", exc)
+
+# list-plugins 명령어
+@cli.command("list-plugins")
+def list_plugins():
+    """List all available plugins / 사용 가능한 플러그인 목록 조회"""
+    plugins = discover_plugins()
+    if not plugins:
+        console.print("[yellow]No plugins discovered.[/yellow]")
+        return
+
+    table = Table(
+        title="🧩 Available S2N Plugins",
+        title_style="bold cyan",
+        box=box.MINIMAL_HEAVY_HEAD,
+        header_style="bold white",
+    )
+    table.add_column("ID", style="bold green")
+    table.add_column("Name")
+    table.add_column("Version", justify="center")
+    table.add_column("Description")
+
+    for p in plugins:
+        table.add_row(
+            p["id"],
+            p["name"],
+            p["version"],
+            p["description"]
+        )
+
+    console.print(table)
+    console.print(f"\nTotal: [bold]{len(plugins)}[/] plugins installed.\n")
+
+
+# inspect-plugin 명령어
+@cli.command("inspect-plugin")
+@click.argument("name")
+def inspect_plugin(name):
+    """View details of a specific plugin / 특정 플러그인 상세 정보 조회"""
+    plugins = discover_plugins()
+    plugin = next((p for p in plugins if p["id"].lower() == name.lower()), None)
+
+    if not plugin:
+        console.print(f"[red]Error: Plugin '{name}' not found.[/red]")
+        return
+
+    table = Table(
+        show_header=False,
+        box=box.SIMPLE_HEAVY,
+        padding=(0, 2),
+        title=f"🔎 Plugin Details: {plugin['name']}",
+        title_style="bold magenta"
+    )
+    table.add_row("ID", plugin["id"])
+    table.add_row("Name", plugin["name"])
+    table.add_row("Version", plugin["version"])
+    table.add_row("Description", plugin["description"])
+
+    console.print(table)
 
 
 if __name__ == "__main__":
