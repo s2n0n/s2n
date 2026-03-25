@@ -43,6 +43,7 @@ from s2n.s2nscanner.interfaces import (
     Severity,
 )
 from s2n.s2nscanner.logger import get_logger
+from s2n.s2nscanner.plugins.discovery import discover_plugins
 
 PLUGIN_PACKAGE = "s2n.s2nscanner.plugins"
 DEFAULT_SCANNER_VERSION = "0.1.0"
@@ -141,31 +142,16 @@ class Scanner:
             return self._discovered_plugins
 
         self.logger.debug("Discovering plugins from package '%s'...", PLUGIN_PACKAGE)
-        try:
-            package = importlib.import_module(PLUGIN_PACKAGE)
-        except ImportError as exc:
-            self.logger.error("Failed to import plugin package '%s': %s", PLUGIN_PACKAGE, exc)
-            return []
-
-        excluded_modules = {"helper"}
-        for _, modname, _ in pkgutil.iter_modules(package.__path__):
-            if modname in excluded_modules:
-                continue
+        metadata = discover_plugins(include_instances=True)
+        
+        for m in metadata:
+            modname = m["id"]
             if self.allowed_plugins and modname.lower() not in self.allowed_plugins:
                 continue
-            module_name = f"{PLUGIN_PACKAGE}.{modname}"
-            try:
-                module = importlib.import_module(module_name)
-                factory = getattr(module, "Plugin", None)
-                if not callable(factory):
-                    self.logger.debug("Module %s does not expose Plugin factory; skipped.", module_name)
-                    continue
-                instance = factory()
-                setattr(instance, "_s2n_module_name", modname)
-                self._discovered_plugins.append(instance)
-                self.logger.debug("Loaded plugin '%s'.", getattr(instance, "name", modname))
-            except Exception:
-                self.logger.exception("Failed to load plugin module '%s'.", module_name)
+            
+            instance = m["instance"]
+            self._discovered_plugins.append(instance)
+            self.logger.debug("Loaded plugin '%s'.", getattr(instance, "name", modname))
 
         self._apply_plugin_ordering()
         return self._discovered_plugins
