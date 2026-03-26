@@ -3,3 +3,5 @@ selenium~=4.20
 beautifulsoup4~=4.12
 webdriver-manager
 click
+PyJWT>=2.8.0
+cryptography>=41.0.0
