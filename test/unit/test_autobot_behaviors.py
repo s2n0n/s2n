@@ -74,7 +74,7 @@ def test_repetitive_query_behavior(mock_driver, logger):
         # Should stop early
         assert result.was_blocked is True
         assert result.requests_sent == 1
-        assert "429 Too Many Requests" in result.evidence
+        assert "차단 감지" in result.evidence
 
     with patch("s2n.s2nscanner.plugins.autobot.autobot_detector.is_blocked", return_value=(False, "")):
         result = behavior.execute(mock_driver, "http://target.com", logger)
