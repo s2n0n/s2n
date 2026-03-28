@@ -11,6 +11,7 @@ from s2n.s2nscanner.interfaces import (
 from s2n.s2nscanner.cli.mapper import cliargs_to_scanrequest
 from s2n.s2nscanner.cli.config_builder import build_scan_config
 from s2n.s2nscanner.auth.dvwa_adapter import DVWAAdapter
+from s2n.s2nscanner.auth.universal_adapter import UniversalAuthAdapter
 from s2n.s2nscanner.scan_engine import Scanner
 from s2n.s2nscanner.report import output_report, OutputFormat
 from s2n.s2nscanner.logger import init_logger
@@ -112,6 +113,7 @@ def cli():
 @click.option("--crawler-depth", default=2, help="Crawler depth / 크롤러 탐색 깊이")
 @click.option("-v", "--verbose", is_flag=True, help="Verbose logging / 상세 로그 출력")
 @click.option("--log-file", help="Log file path / 로그 파일 경로")
+@click.option("--login-url", default=None, help="Login page URL for auto auth / 자동 인증 시 로그인 페이지 URL")
 def scan(
     url,
     plugin,
@@ -125,6 +127,7 @@ def scan(
     crawler_depth,
     verbose,
     log_file,
+    login_url,
 ):
     """Run a vulnerability scan / 취약점 스캔 실행"""
     logger = init_logger(verbose, log_file)
@@ -171,6 +174,23 @@ def scan(
             logger.info("DVWA 로그인 완료")
         else:
             logger.warning("DVWA 로그인 실패 - 인증 없이 진행")
+
+    elif (auth or "").lower() == "auto":
+        logger.info("Universal (auto) authentication requested.")
+        auth_adapter = UniversalAuthAdapter(
+            base_url=request.target_url,
+            login_url=login_url,
+        )
+
+        if username:
+            auth_credentials = [(username, password or "")]
+            if auth_adapter.ensure_authenticated(auth_credentials):
+                http_client = auth_adapter.get_client()
+                logger.info("자동 인증 로그인 완료")
+            else:
+                logger.warning("자동 인증 로그인 실패 - 인증 없이 진행")
+        else:
+            logger.warning("--username 미지정 — 인증 없이 진행")
 
     # ScanContext 생성
     scan_ctx = ScanContext(
