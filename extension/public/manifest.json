@@ -2,6 +2,7 @@
     "manifest_version": 3,
     "name": "S2N Scanner",
     "version": "0.1.0",
+    "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyRu/052b2dwcRRqyAoM68bpRMb3ig90zSwQH747TNJZrIvIIp0hPGyAeXeLx6hUvuWSBixTeW5fKlSKJuO9OZjqof2Tlu3IO5Mx88tZ1nO8ndnePeDeeArTSmCOBKw7DJxmJtxcqUH68rLi+MjP8xIaU0/ZSdH0TrJY8YrfAiQBdqaxWL5Aawc9vVwv8z3MLLrsSPcYBp9gqegWuqVMbTg1YwZKkhGw6EjOhoW2JRqkw3/U8Na06Gp0dEJmRNPb6Tb/adhPBikL3BaU4/Y19mVNCk9pLKM1HvPaDwBpqstWKsKVxj/7pXZo71TOWVEoPR47wGYsCy6sKppFZofsaEwIDAQAB",
     "description": "S2N 취약점 스캐너 Chrome Extension GUI",
     "permissions": [
         "nativeMessaging",
