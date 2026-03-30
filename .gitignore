@@ -17,6 +17,7 @@ __pycache__/
 node_modules/
 dist/
 s2n.egg-info/
+.DS_Store
 
 # Pytest
 .pytest_cache/
