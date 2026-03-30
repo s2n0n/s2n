@@ -4,6 +4,7 @@ from datetime import datetime
 import sys
 import platform
 import json
+import subprocess
 from pathlib import Path
 
 from s2n.s2nscanner.interfaces import (
@@ -480,6 +481,20 @@ def install_host(ext_id):
             console.print(f"[yellow]Please manually add registry key: HKCU\\{key_path} -> {target_manifest}[/yellow]")
 
     console.print(f"[green]✅ Installation Complete: {target_manifest}[/green]")
+    
+    # 확장 프로그램 프론트엔드 빌드 자동화
+    extension_dir = package_root / "extension"
+    if extension_dir.exists() and (extension_dir / "package.json").exists():
+        console.print("[cyan]📦 Compiling Chrome Extension Frontend...[/cyan]")
+        try:
+            subprocess.run(["npm", "install"], cwd=extension_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["npm", "run", "build"], cwd=extension_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            console.print(f"[green]✅ Frontend compiled successfully to '{extension_dir / 'dist'}'[/green]")
+        except subprocess.CalledProcessError:
+            console.print("[yellow]⚠️ Warning: Failed to compile frontend automatically. Please run 'npm install && npm run build' inside the 'extension' directory manually.[/yellow]")
+        except FileNotFoundError:
+            console.print("[yellow]⚠️ Warning: 'npm' command not found. Please install Node.js and compile manually.[/yellow]")
+            
     console.print("[cyan]Please restart Google Chrome to apply changes.[/cyan]")
 
 
