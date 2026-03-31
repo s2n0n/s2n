@@ -1,7 +1,9 @@
 # S2N — Plugin-based Web Vulnerability Scanner
 
 [![PyPI Version](https://img.shields.io/pypi/v/s2n)](https://pypi.org/project/s2n/)
-[![PyPI downloads](https://img.shields.io/pypi/dm/s2n)](https://pypi.org/project/s2n/)
+[![PyPI Downloads](https://static.pepy.tech/badge/s2n)](https://pepy.tech/project/s2n)
+[![Monthly Downloads](https://img.shields.io/pypi/dm/s2n)](https://pypi.org/project/s2n/)
+[![Docker Pulls](https://img.shields.io/docker/pulls/opens2n/s2n-docker.svg)](https://hub.docker.com/r/opens2n/s2n-docker)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ```mermaid
