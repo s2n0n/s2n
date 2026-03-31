@@ -419,6 +419,23 @@ def inspect_plugin(name):
     help="Chrome Extension ID (leave empty to use default)"
 )
 def install_host(ext_id):
+    """Alias implementation moved to a helper or just kept here"""
+    _install_host_logic(ext_id)
+
+# install-gui (Alias for install-host)
+@cli.command("install-gui")
+@click.option(
+    "--ext-id",
+    prompt="Chrome Extension ID (Press Enter to use default)",
+    default="obfffedgblnnppemflanjipgocbbggjg",
+    help="Chrome Extension ID (leave empty to use default)"
+)
+def install_gui(ext_id):
+    """Install Chrome Extension GUI & Host / 크롬 익스텐션 GUI 및 호스트 설치"""
+    _install_host_logic(ext_id)
+
+def _install_host_logic(ext_id):
+    """Common logic for host installation"""
     """Install Chrome Native Messaging Host / 네이티브 메시징 호스트 설치"""
     console.print(f"[cyan]Installing S2N Native Messaging Host (Extension ID: {ext_id})...[/cyan]")
     
