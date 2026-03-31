@@ -415,7 +415,7 @@ def inspect_plugin(name):
 @click.option(
     "--ext-id",
     prompt="Chrome Extension ID (Press Enter to use default)",
-    default="eejihpgfhbmahbniaaemepoelhkaeaja",
+    default="obfffedgblnnppemflanjipgocbbggjg",
     help="Chrome Extension ID (leave empty to use default)"
 )
 def install_host(ext_id):
