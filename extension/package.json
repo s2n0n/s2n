@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:zip": "npm run build && cd dist && zip -r ../s2n-extension.zip .",
     "lint": "eslint .",
     "preview": "vite preview"
   },

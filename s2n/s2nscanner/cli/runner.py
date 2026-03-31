@@ -1,6 +1,11 @@
 from __future__ import annotations
 import click
 from datetime import datetime
+import sys
+import platform
+import json
+import subprocess
+from pathlib import Path
 
 from s2n.s2nscanner.interfaces import (
     CLIArguments,
@@ -403,6 +408,111 @@ def inspect_plugin(name):
     table.add_row("Description", plugin["description"])
 
     console.print(table)
+
+
+# install-host 명령어
+@cli.command("install-host")
+@click.option(
+    "--ext-id",
+    prompt="Chrome Extension ID (Press Enter to use default)",
+    default="obfffedgblnnppemflanjipgocbbggjg",
+    help="Chrome Extension ID (leave empty to use default)"
+)
+def install_host(ext_id):
+    """Alias implementation moved to a helper or just kept here"""
+    _install_host_logic(ext_id)
+
+# install-gui (Alias for install-host)
+@cli.command("install-gui")
+@click.option(
+    "--ext-id",
+    prompt="Chrome Extension ID (Press Enter to use default)",
+    default="obfffedgblnnppemflanjipgocbbggjg",
+    help="Chrome Extension ID (leave empty to use default)"
+)
+def install_gui(ext_id):
+    """Install Chrome Extension GUI & Host / 크롬 익스텐션 GUI 및 호스트 설치"""
+    _install_host_logic(ext_id)
+
+def _install_host_logic(ext_id):
+    """Common logic for host installation"""
+    """Install Chrome Native Messaging Host / 네이티브 메시징 호스트 설치"""
+    console.print(f"[cyan]Installing S2N Native Messaging Host (Extension ID: {ext_id})...[/cyan]")
+    
+    # 경로 설정
+    package_root = Path(__file__).resolve().parent.parent.parent.parent
+    native_host_path = package_root / "native_host.py"
+    
+    if not native_host_path.exists():
+        console.print(f"[red]Error: Cannot find native_host.py at {native_host_path}[/red]")
+        return
+        
+    system = platform.system()
+    home = Path.home()
+    
+    if system == "Darwin":
+        target_dir = home / "Library" / "Application Support" / "Google" / "Chrome" / "NativeMessagingHosts"
+    elif system == "Linux":
+        target_dir = home / ".config" / "google-chrome" / "NativeMessagingHosts"
+    elif system == "Windows":
+        target_dir = home / "AppData" / "Local" / "Google" / "Chrome" / "User Data" / "NativeMessagingHosts"
+    else:
+        console.print(f"[red]Unsupported OS: {system}[/red]")
+        return
+        
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_manifest = target_dir / "com.s2n.scanner.json"
+    
+    if system == "Windows":
+        launcher_path = target_dir / "com.s2n.scanner_launcher.bat"
+        launcher_content = f'@echo off\r\n"{sys.executable}" "{native_host_path}" %*'
+        launcher_path.write_text(launcher_content)
+    else:
+        launcher_path = target_dir / "com.s2n.scanner_launcher.sh"
+        launcher_content = f'#!/bin/bash\nexport PYTHONPATH="{package_root}:$PYTHONPATH"\nexec "{sys.executable}" "{native_host_path}" "$@"\n'
+        launcher_path.write_text(launcher_content)
+        launcher_path.chmod(0o755)
+        native_host_path.chmod(0o755)
+        
+    # 런타임에 매니페스트 JSON 생성 (외부 파일 의존성 제거)
+    manifest_data = {
+        "name": "com.s2n.scanner",
+        "description": "S2N Vulnerability Scanner Native Messaging Host",
+        "path": str(launcher_path),
+        "type": "stdio",
+        "allowed_origins": [f"chrome-extension://{ext_id}/"]
+    }
+    
+    with open(target_manifest, "w", encoding="utf-8") as f:
+        json.dump(manifest_data, f, indent=4)
+        
+    if system == "Windows":
+        try:
+            import winreg
+            key_path = r"Software\\Google\\Chrome\\NativeMessagingHosts\\com.s2n.scanner"
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path)
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, str(target_manifest))
+            winreg.CloseKey(key)
+        except Exception as e:
+            console.print(f"[yellow]Warning: Failed to set Windows Registry: {e}[/yellow]")
+            console.print(f"[yellow]Please manually add registry key: HKCU\\{key_path} -> {target_manifest}[/yellow]")
+
+    console.print(f"[green]✅ Installation Complete: {target_manifest}[/green]")
+    
+    # 확장 프로그램 프론트엔드 빌드 자동화
+    extension_dir = package_root / "extension"
+    if extension_dir.exists() and (extension_dir / "package.json").exists():
+        console.print("[cyan]📦 Compiling Chrome Extension Frontend...[/cyan]")
+        try:
+            subprocess.run(["npm", "install"], cwd=extension_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["npm", "run", "build"], cwd=extension_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            console.print(f"[green]✅ Frontend compiled successfully to '{extension_dir / 'dist'}'[/green]")
+        except subprocess.CalledProcessError:
+            console.print("[yellow]⚠️ Warning: Failed to compile frontend automatically. Please run 'npm install && npm run build' inside the 'extension' directory manually.[/yellow]")
+        except FileNotFoundError:
+            console.print("[yellow]⚠️ Warning: 'npm' command not found. Please install Node.js and compile manually.[/yellow]")
+            
+    console.print("[cyan]Please restart Google Chrome to apply changes.[/cyan]")
 
 
 if __name__ == "__main__":
