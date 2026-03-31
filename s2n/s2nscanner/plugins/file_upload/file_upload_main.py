@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 
 # interfaces에서 제공되는 타입 사용
@@ -31,7 +31,7 @@ class FileUploadPlugin:
     name = "file_upload"
     description = "파일 업로드 취약점을 탐지합니다."
 
-    def __init__(self, config: PluginContext | None = None):
+    def __init__(self, config: Optional[PluginContext] = None):
         self.config = config or {}
         # depth: config에서 가져오거나 기본값 2 사용
         self.depth = int(getattr(self.config, "depth", 2))
@@ -121,14 +121,22 @@ class FileUploadPlugin:
 
         except Exception as e:
             log.exception("[!] Error during file upload testing: %s", e)
-            return PluginError(
-                error_type=type(e).__name__,
-                message=str(e),
-                traceback=str(e.__traceback__),
+            return PluginResult(
+                plugin_name=self.name,
+                status=PluginStatus.FAILED,
+                findings=findings,
+                start_time=start_time,
+                end_time=datetime.now(),
+                duration_seconds=(datetime.now() - start_time).total_seconds(),
+                error=PluginError(
+                    error_type=type(e).__name__,
+                    message=str(e),
+                    traceback=str(e.__traceback__),
+                ),
             )
 
 
-def main(config: PluginContext | None = None):
+def main(config: Optional[PluginContext] = None):
     """플러그인 인스턴스를 생성하여 반환합니다."""
     return FileUploadPlugin(config)
 

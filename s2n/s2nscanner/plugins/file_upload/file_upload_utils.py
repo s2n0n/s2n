@@ -4,10 +4,10 @@ import uuid
 import tempfile
 import requests
 from urllib.parse import urljoin, urlparse
-from html.parser import HTMLParser
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Optional, Tuple
 from datetime import datetime
 
+from s2n.s2nscanner.plugins.helper import Form, FormParser
 from s2n.s2nscanner.interfaces import (
     Finding,
     PluginContext,
@@ -20,32 +20,7 @@ from s2n.s2nscanner.auth.dvwa_adapter import DVWAAdapter
 logger = get_logger("plugins.file_upload.utils")
 
 
-class Form:
-    def __init__(self, attrs: Dict[str, str]):
-        self.attrs = attrs
-        self.inputs: List[Dict[str, str]] = []
 
-    def get(self, key: str, default: Any = None) -> Any:
-        return self.attrs.get(key, default)
-
-
-class FormParser(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.forms: List[Form] = []
-        self.current_form: Optional[Form] = None
-
-    def handle_starttag(self, tag, attrs):
-        attrs_dict = dict(attrs)
-        if tag == "form":
-            self.current_form = Form(attrs_dict)
-        elif tag == "input" and self.current_form is not None:
-            self.current_form.inputs.append(attrs_dict)
-
-    def handle_endtag(self, tag):
-        if tag == "form" and self.current_form is not None:
-            self.forms.append(self.current_form)
-            self.current_form = None
 
 
 class RobustDVWAAdapter(DVWAAdapter):

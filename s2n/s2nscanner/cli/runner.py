@@ -1,6 +1,11 @@
 from __future__ import annotations
 import click
 from datetime import datetime
+import sys
+import platform
+import json
+import subprocess
+from pathlib import Path
 
 from s2n.s2nscanner.interfaces import (
     CLIArguments,
@@ -11,9 +16,11 @@ from s2n.s2nscanner.interfaces import (
 from s2n.s2nscanner.cli.mapper import cliargs_to_scanrequest
 from s2n.s2nscanner.cli.config_builder import build_scan_config
 from s2n.s2nscanner.auth.dvwa_adapter import DVWAAdapter
+from s2n.s2nscanner.auth.universal_adapter import UniversalAuthAdapter
 from s2n.s2nscanner.scan_engine import Scanner
 from s2n.s2nscanner.report import output_report, OutputFormat
 from s2n.s2nscanner.logger import init_logger
+from s2n.s2nscanner.plugins.discovery import discover_plugins
 
 import os
 from rich.console import Console
@@ -36,10 +43,10 @@ is_ci = os.getenv("CI", "").lower() in ("true", "1", "yes")
 console = Console(force_terminal=True, force_interactive=not is_ci)
 
 
-# CLI Root
-@click.group()
-def cli():
-    ascii_logo = r"""
+# S2N 전용 Click Group (Help 출력 시 로고와 예시를 항상 포함하기 위함)
+class S2NGroup(click.Group):
+    def format_help(self, ctx, formatter):
+        ascii_logo = r"""
     (`-').->        <-. (`-')_
     ( OO)_             \( OO) )
     (_)--\_)  .----. ,--./ ,--/
@@ -51,10 +58,27 @@ def cli():
 
     S2N Web Vulnerability Scanner CLI
     """
+        colored_logo = click.style(ascii_logo, fg="blue", bold=True)
+        click.echo(colored_logo)
+        click.echo("🔍 Welcome to S2N Scanner! Your plugin-based web vulnerability scanner.\n")
+        
+        click.echo(click.style("[Usage Examples]", fg="cyan", bold=True, underline=True))
+        click.echo("  s2n scan -u http://example.com                 # Scan with all default plugins")
+        click.echo("  s2n scan -u http://example.com --all           # Explicitly run all plugins")
+        click.echo("  s2n scan -u http://example.com -p brute_force -y # Run brute force, accepting risks")
+        click.echo("  s2n list-plugins                               # List all available plugins")
+        click.echo("  s2n inspect-plugin xss                         # View details of a specific plugin")
+        click.echo("  s2n --help                                    # Show this help message\n")
+        
+        # 기본 Click 도움말 출력
+        super().format_help(ctx, formatter)
 
-    colored_logo = click.style(ascii_logo, fg="blue", bold=True)
-    click.echo(colored_logo)
-    click.echo("🔍 Welcome to S2N Scanner! Use --help to explore commands.\n")
+
+# CLI Root
+@click.group(cls=S2NGroup)
+def cli():
+    # S2NGroup에서 Help 처리를 하므로 여기서는 pass
+    pass
 
 
 # scan 명령어
@@ -64,12 +88,20 @@ def cli():
     "-p",
     "--plugin",
     multiple=True,
-    help="Plugins to use (can be used multiple times) \n사용할 플러그인 이름 (복수 선택 가능)\n\n[options: csrf, sqlinjection, file_upload, oscommand, xss, brute_force, soft_brute_force]",
+    help="Plugins to use (can be used multiple times). If omitted or if --all is used, all default plugins will run. \n"
+         "사용할 플러그인 이름. 생략하거나 --all 사용 시 전체 플러그인이 실행됩니다. \n\n"
+         f"[available: {', '.join([p['id'] for p in discover_plugins()]) or 'none'}]",
+)
+@click.option(
+    "--all", "run_all", is_flag=True, help="Run all default plugins / 모든 기본 플러그인 실행"
 )
 @click.option(
     "-a",
     "--auth",
     help="Authentication type \n인증 타입 \n\n(NONE, BASIC, BEARER, DVWA, etc.)",
+)
+@click.option(
+    "-y", "--accept-risk", is_flag=True, help="Automatically bypass brute force warning / 무차별 대입 공격 경고 자동 동의"
 )
 @click.option("--username", help="Username for authentication \n인증용 사용자명")
 @click.option("--password", help="Password for authentication \n인증용 비밀번호")
@@ -86,10 +118,13 @@ def cli():
 @click.option("--crawler-depth", default=2, help="Crawler depth / 크롤러 탐색 깊이")
 @click.option("-v", "--verbose", is_flag=True, help="Verbose logging / 상세 로그 출력")
 @click.option("--log-file", help="Log file path / 로그 파일 경로")
+@click.option("--login-url", default=None, help="Login page URL for auto auth / 자동 인증 시 로그인 페이지 URL")
 def scan(
     url,
     plugin,
+    run_all,
     auth,
+    accept_risk,
     username,
     password,
     output,
@@ -97,14 +132,21 @@ def scan(
     crawler_depth,
     verbose,
     log_file,
+    login_url,
 ):
+    """Run a vulnerability scan / 취약점 스캔 실행"""
     logger = init_logger(verbose, log_file)
     logger.info("Starting scan for %s", url)
+
+    # --all 플래그 처리 및 --plugin 생략 처리
+    plugin_list = list(plugin)
+    if run_all or not plugin_list:
+        plugin_list = ["csrf", "sqlinjection", "file_upload", "oscommand", "xss", "brute_force", "soft_brute_force"]
 
     # CLIArguments 구성
     args = CLIArguments(
         url=url,
-        plugin=list(plugin),
+        plugin=plugin_list,
         auth=auth,
         username=username,
         password=password,
@@ -113,6 +155,7 @@ def scan(
         depth=crawler_depth,
         verbose=verbose,
         log_file=log_file,
+        accept_risk=accept_risk,
     )
 
     request = cliargs_to_scanrequest(args)
@@ -136,6 +179,23 @@ def scan(
             logger.info("DVWA 로그인 완료")
         else:
             logger.warning("DVWA 로그인 실패 - 인증 없이 진행")
+
+    elif (auth or "").lower() == "auto":
+        logger.info("Universal (auto) authentication requested.")
+        auth_adapter = UniversalAuthAdapter(
+            base_url=request.target_url,
+            login_url=login_url,
+        )
+
+        if username:
+            auth_credentials = [(username, password or "")]
+            if auth_adapter.ensure_authenticated(auth_credentials):
+                http_client = auth_adapter.get_client()
+                logger.info("자동 인증 로그인 완료")
+            else:
+                logger.warning("자동 인증 로그인 실패 - 인증 없이 진행")
+        else:
+            logger.warning("--username 미지정 — 인증 없이 진행")
 
     # ScanContext 생성
     scan_ctx = ScanContext(
@@ -290,6 +350,169 @@ def scan(
         logger.info("Scan report successfully generated.")
     except Exception as exc:
         logger.exception("Failed to output report: %s", exc)
+
+# list-plugins 명령어
+@cli.command("list-plugins")
+def list_plugins():
+    """List all available plugins / 사용 가능한 플러그인 목록 조회"""
+    plugins = discover_plugins()
+    if not plugins:
+        console.print("[yellow]No plugins discovered.[/yellow]")
+        return
+
+    table = Table(
+        title="🧩 Available S2N Plugins",
+        title_style="bold cyan",
+        box=box.MINIMAL_HEAVY_HEAD,
+        header_style="bold white",
+    )
+    table.add_column("ID", style="bold green")
+    table.add_column("Name")
+    table.add_column("Version", justify="center")
+    table.add_column("Description")
+
+    for p in plugins:
+        table.add_row(
+            p["id"],
+            p["name"],
+            p["version"],
+            p["description"]
+        )
+
+    console.print(table)
+    console.print(f"\nTotal: [bold]{len(plugins)}[/] plugins installed.\n")
+
+
+# inspect-plugin 명령어
+@cli.command("inspect-plugin")
+@click.argument("name")
+def inspect_plugin(name):
+    """View details of a specific plugin / 특정 플러그인 상세 정보 조회"""
+    plugins = discover_plugins()
+    plugin = next((p for p in plugins if p["id"].lower() == name.lower()), None)
+
+    if not plugin:
+        console.print(f"[red]Error: Plugin '{name}' not found.[/red]")
+        return
+
+    table = Table(
+        show_header=False,
+        box=box.SIMPLE_HEAVY,
+        padding=(0, 2),
+        title=f"🔎 Plugin Details: {plugin['name']}",
+        title_style="bold magenta"
+    )
+    table.add_row("ID", plugin["id"])
+    table.add_row("Name", plugin["name"])
+    table.add_row("Version", plugin["version"])
+    table.add_row("Description", plugin["description"])
+
+    console.print(table)
+
+
+# install-host 명령어
+@cli.command("install-host")
+@click.option(
+    "--ext-id",
+    prompt="Chrome Extension ID (Press Enter to use default)",
+    default="obfffedgblnnppemflanjipgocbbggjg",
+    help="Chrome Extension ID (leave empty to use default)"
+)
+def install_host(ext_id):
+    """Alias implementation moved to a helper or just kept here"""
+    _install_host_logic(ext_id)
+
+# install-gui (Alias for install-host)
+@cli.command("install-gui")
+@click.option(
+    "--ext-id",
+    prompt="Chrome Extension ID (Press Enter to use default)",
+    default="obfffedgblnnppemflanjipgocbbggjg",
+    help="Chrome Extension ID (leave empty to use default)"
+)
+def install_gui(ext_id):
+    """Install Chrome Extension GUI & Host / 크롬 익스텐션 GUI 및 호스트 설치"""
+    _install_host_logic(ext_id)
+
+def _install_host_logic(ext_id):
+    """Common logic for host installation"""
+    """Install Chrome Native Messaging Host / 네이티브 메시징 호스트 설치"""
+    console.print(f"[cyan]Installing S2N Native Messaging Host (Extension ID: {ext_id})...[/cyan]")
+    
+    # 경로 설정
+    package_root = Path(__file__).resolve().parent.parent.parent.parent
+    native_host_path = package_root / "native_host.py"
+    
+    if not native_host_path.exists():
+        console.print(f"[red]Error: Cannot find native_host.py at {native_host_path}[/red]")
+        return
+        
+    system = platform.system()
+    home = Path.home()
+    
+    if system == "Darwin":
+        target_dir = home / "Library" / "Application Support" / "Google" / "Chrome" / "NativeMessagingHosts"
+    elif system == "Linux":
+        target_dir = home / ".config" / "google-chrome" / "NativeMessagingHosts"
+    elif system == "Windows":
+        target_dir = home / "AppData" / "Local" / "Google" / "Chrome" / "User Data" / "NativeMessagingHosts"
+    else:
+        console.print(f"[red]Unsupported OS: {system}[/red]")
+        return
+        
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_manifest = target_dir / "com.s2n.scanner.json"
+    
+    if system == "Windows":
+        launcher_path = target_dir / "com.s2n.scanner_launcher.bat"
+        launcher_content = f'@echo off\r\n"{sys.executable}" "{native_host_path}" %*'
+        launcher_path.write_text(launcher_content)
+    else:
+        launcher_path = target_dir / "com.s2n.scanner_launcher.sh"
+        launcher_content = f'#!/bin/bash\nexport PYTHONPATH="{package_root}:$PYTHONPATH"\nexec "{sys.executable}" "{native_host_path}" "$@"\n'
+        launcher_path.write_text(launcher_content)
+        launcher_path.chmod(0o755)
+        native_host_path.chmod(0o755)
+        
+    # 런타임에 매니페스트 JSON 생성 (외부 파일 의존성 제거)
+    manifest_data = {
+        "name": "com.s2n.scanner",
+        "description": "S2N Vulnerability Scanner Native Messaging Host",
+        "path": str(launcher_path),
+        "type": "stdio",
+        "allowed_origins": [f"chrome-extension://{ext_id}/"]
+    }
+    
+    with open(target_manifest, "w", encoding="utf-8") as f:
+        json.dump(manifest_data, f, indent=4)
+        
+    if system == "Windows":
+        try:
+            import winreg
+            key_path = r"Software\\Google\\Chrome\\NativeMessagingHosts\\com.s2n.scanner"
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path)
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, str(target_manifest))
+            winreg.CloseKey(key)
+        except Exception as e:
+            console.print(f"[yellow]Warning: Failed to set Windows Registry: {e}[/yellow]")
+            console.print(f"[yellow]Please manually add registry key: HKCU\\{key_path} -> {target_manifest}[/yellow]")
+
+    console.print(f"[green]✅ Installation Complete: {target_manifest}[/green]")
+    
+    # 확장 프로그램 프론트엔드 빌드 자동화
+    extension_dir = package_root / "extension"
+    if extension_dir.exists() and (extension_dir / "package.json").exists():
+        console.print("[cyan]📦 Compiling Chrome Extension Frontend...[/cyan]")
+        try:
+            subprocess.run(["npm", "install"], cwd=extension_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["npm", "run", "build"], cwd=extension_dir, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            console.print(f"[green]✅ Frontend compiled successfully to '{extension_dir / 'dist'}'[/green]")
+        except subprocess.CalledProcessError:
+            console.print("[yellow]⚠️ Warning: Failed to compile frontend automatically. Please run 'npm install && npm run build' inside the 'extension' directory manually.[/yellow]")
+        except FileNotFoundError:
+            console.print("[yellow]⚠️ Warning: 'npm' command not found. Please install Node.js and compile manually.[/yellow]")
+            
+    console.print("[cyan]Please restart Google Chrome to apply changes.[/cyan]")
 
 
 if __name__ == "__main__":

@@ -14,8 +14,10 @@ __pycache__/
 .env.local
 .env.dev
 .env.prod
+node_modules/
 dist/
 s2n.egg-info/
+.DS_Store
 
 # Pytest
 .pytest_cache/

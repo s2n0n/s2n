@@ -1,5 +1,11 @@
 # S2N — Plugin-based Web Vulnerability Scanner
 
+[![PyPI Version](https://img.shields.io/pypi/v/s2n)](https://pypi.org/project/s2n/)
+[![PyPI Downloads](https://static.pepy.tech/badge/s2n)](https://pepy.tech/project/s2n)
+[![Monthly Downloads](https://img.shields.io/pypi/dm/s2n)](https://pypi.org/project/s2n/)
+[![Docker Pulls](https://img.shields.io/docker/pulls/opens2n/s2n-docker.svg)](https://hub.docker.com/r/opens2n/s2n-docker)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 ```mermaid
 stateDiagram-v2
 
@@ -31,18 +37,43 @@ style logo color: #FFF, fill:#0022FF
 
 ## Quick install
 
-### CLI usage
+### CLI Usage
+
+Execute a scan from the command line:
 
 ```bash
 s2n scan \
   --url http://target.com \
-  --plugin sql --plugin xss \
-  --auth basic \
+  --all \
+  --auth auto \
   --username admin \
   --password pass \
-  --output results.json \
-  --verbose
+  --output-format html \
+  --output results.html
 ```
+
+Common options:
+
+- `-u, --url`: Target URL to scan (Required)
+- `-p, --plugin`: Select specific plugins (multiple allowed)
+- `--all`: Run all default plugins
+- `-a, --auth`: Authentication type (NONE, BASIC, BEARER, AUTO, etc.)
+- `--login-url`: Login page URL for automatic authentication
+- `-o, --output`: Save results to a file
+- `--output-format`: Output format (JSON, HTML, CSV, CONSOLE, MULTI)
+- `--crawler-depth`: Set crawling depth (Default: 2)
+- `-v, --verbose`: Enable detailed logging
+
+### Chrome Extension Usage (GUI)
+
+S2N provides a user-friendly scanning experience via a Chrome Extension alongside the CLI. Follow these steps to link the extension with your local S2N host.
+
+1. **Install Extension**: Install the S2N Scanner extension from the Chrome Web Store or via Developer Mode.
+2. **Link Host**: Run the following command in your terminal to install the Native Messaging Host. This establishes communication between your browser and the local scanner. (It will automatically link to the official default Extension ID)
+   ```bash
+   s2n install-gui
+   ```
+3. Restart your browser and click the extension icon to start scanning.
 
 ### Python usage
 
@@ -107,9 +138,13 @@ for result in report.plugin_results:
 
 ## Features
 
-Plugin architecture for modular vulnerability checks Structured data models for requests,
-results and outputs Multiple output formats (`JSON`, `HTML`, `console`)
-Configurable scanner behavior and per-plugin settings.
+- Plugin-based Architecture: Modular vulnerability checks for easy expansion.
+- Advanced Crawling & Discovery: Universal login support and automatic attack point detection.
+- Supported Plugins: SQL Injection, XSS, CSRF, JWT, OS Command Injection, File Upload, Brute Force, etc.
+- Multiple UI Clients: Powerful CLI and Chrome Extension GUI for various workflows.
+- Rich Reporting: Structured data models with support for JSON, HTML, CSV, and Console outputs.
+- Cross-Platform Support: Optimized detection patterns for Windows, Linux, and macOS environments.
+- Automated Testing: Integrated CI/CD support for security regression testing.
 
 ---
 

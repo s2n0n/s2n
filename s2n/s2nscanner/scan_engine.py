@@ -43,6 +43,7 @@ from s2n.s2nscanner.interfaces import (
     Severity,
 )
 from s2n.s2nscanner.logger import get_logger
+from s2n.s2nscanner.plugins.discovery import discover_plugins
 
 PLUGIN_PACKAGE = "s2n.s2nscanner.plugins"
 DEFAULT_SCANNER_VERSION = "0.1.0"
@@ -141,31 +142,16 @@ class Scanner:
             return self._discovered_plugins
 
         self.logger.debug("Discovering plugins from package '%s'...", PLUGIN_PACKAGE)
-        try:
-            package = importlib.import_module(PLUGIN_PACKAGE)
-        except ImportError as exc:
-            self.logger.error("Failed to import plugin package '%s': %s", PLUGIN_PACKAGE, exc)
-            return []
-
-        excluded_modules = {"helper"}
-        for _, modname, _ in pkgutil.iter_modules(package.__path__):
-            if modname in excluded_modules:
-                continue
+        metadata = discover_plugins(include_instances=True)
+        
+        for m in metadata:
+            modname = m["id"]
             if self.allowed_plugins and modname.lower() not in self.allowed_plugins:
                 continue
-            module_name = f"{PLUGIN_PACKAGE}.{modname}"
-            try:
-                module = importlib.import_module(module_name)
-                factory = getattr(module, "Plugin", None)
-                if not callable(factory):
-                    self.logger.debug("Module %s does not expose Plugin factory; skipped.", module_name)
-                    continue
-                instance = factory()
-                setattr(instance, "_s2n_module_name", modname)
-                self._discovered_plugins.append(instance)
-                self.logger.debug("Loaded plugin '%s'.", getattr(instance, "name", modname))
-            except Exception:
-                self.logger.exception("Failed to load plugin module '%s'.", module_name)
+            
+            instance = m["instance"]
+            self._discovered_plugins.append(instance)
+            self.logger.debug("Loaded plugin '%s'.", getattr(instance, "name", modname))
 
         self._apply_plugin_ordering()
         return self._discovered_plugins
@@ -180,7 +166,36 @@ class Scanner:
         if self.auth_adapter and not self.defer_authentication:
             self._ensure_authenticated()
 
+        # smart_crawl 연동 — SiteMap 생성 후 컨텍스트에 첨부
+        try:
+            from s2n.s2nscanner.crawler.smart_crawler import smart_crawl
+
+            crawl_depth = getattr(self.config.scanner_config, "crawl_depth", 2)
+            sitemap = smart_crawl(
+                self.config.target_url,
+                self.http_client or self.scan_context.http_client,
+                depth=crawl_depth,
+            )
+            setattr(self.scan_context, "sitemap", sitemap)
+            self.logger.info(
+                "SiteMap built: %d pages, %d URLs",
+                len(sitemap.pages),
+                len(sitemap.all_urls),
+            )
+        except Exception:
+            self.logger.warning("smart_crawl failed, proceeding without SiteMap", exc_info=True)
+
         plugins = self.discover_plugins()
+
+        # 플러그인이 target_form_types를 선언하면 SiteMap에 동적 등록
+        sitemap = getattr(self.scan_context, "sitemap", None)
+        if sitemap:
+            for plugin in plugins:
+                form_types = getattr(plugin, "target_form_types", None)
+                if form_types is not None:
+                    identifier = self._get_plugin_identifier(plugin)
+                    sitemap.register_plugin(identifier, form_types)
+
         total_plugins = len(plugins)
         if total_plugins:
             self._emit_progress(0, total_plugins, "🧭 Preparing Scan \n 스캔 준비 중")
@@ -233,9 +248,7 @@ class Scanner:
 
                 # findings 접근 전 유효성 체크
                 findings = getattr(result, "findings", None)
-                if findings is not None:
-                    self._emit_findings(findings)
-                else:
+                if findings is None:
                     self.logger.warning(f"⚠️ Plugin '{plugin_name}' returned result without 'findings' field.")
 
             except Exception as e:
@@ -423,11 +436,19 @@ class Scanner:
 
         self.logger.debug(f"🚀 Running plugin '{plugin_name}' with config: {plugin_config}")
 
+        # SiteMap 기반 target_urls 설정
+        target_urls = [self.config.target_url]
+        sitemap = getattr(self.scan_context, "sitemap", None)
+        if sitemap:
+            sm_urls = sitemap.get_urls()
+            if sm_urls:
+                target_urls = sm_urls
+
         plugin_context = PluginContext(
             plugin_name=plugin_name,
             scan_context=self.scan_context,
             plugin_config=plugin_config,
-            target_urls=[self.config.target_url],
+            target_urls=target_urls,
             logger=plugin_logger,
         )
 
@@ -472,7 +493,7 @@ class Scanner:
                 self.logger.info(f"✅ {plugin_name}.post_scan() completed")
 
                 if not isinstance(final_result, PluginResult):
-                    raise TypeError("post_scan() must return a PluginResult instance, got {type(final_result).__name__}")
+                    raise TypeError(f"post_scan() must return a PluginResult instance, got {type(final_result).__name__}")
                 
                 raw_result = final_result
             
@@ -496,7 +517,7 @@ class Scanner:
                 self.logger.warning(f"⚠️ Plugin '{plugin_name}' has no run() or post_scan() method. Skipping.")
                 return self._build_skipped_result(plugin_name, "no run() or post_scan() method")
             
-            err = PluginError(error_type="PluginContractError", message="plugin returned None", timestamp=datetime.utcnow)
+            err = PluginError(error_type="PluginContractError", message="plugin returned None", timestamp=datetime.utcnow())
             return self._plugin_failure_result(plugin_name, err, start_time)
         
 

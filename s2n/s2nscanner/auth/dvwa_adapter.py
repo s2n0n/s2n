@@ -53,7 +53,6 @@ class DVWAAdapter:
     def authenticate(self, creds: List[Tuple[str, str]]) -> Optional[Tuple[str, str]]:
         """DVWA 로그인 시도, 성공 시 (username, password) 반환"""
         url = f"{self.base}{self.login_path}"
-        # self.logger.info("inner authenticate url: %s >>>>>>>>>> \n", url)
         for user, pw in creds:
             try:
                 # 로그인 페이지에서 토큰 추출
@@ -65,14 +64,20 @@ class DVWAAdapter:
                     data["user_token"] = token
 
                 post = self._client.post(url, data=data, timeout=10)
+
+                # [FIX] 로그인 성공 여부를 실제로 확인한 뒤에만 반환
                 if "logout.php" in (post.text or "") or "Logout" in (post.text or ""):
                     self._last_auth = (user, pw, time.time())
+                    return (user, pw)
 
-                # Must Return Tuple if login is not failed
-                return (user, pw)
+                self.logger.warning(
+                    "[DVWAAdapter] Login failed for user: %s", user
+                )
 
             except Exception:
-                self.logger.exception("[DVWAAdapter] Failed to authenticate with %s:%s", user, pw)
+                self.logger.exception(
+                    "[DVWAAdapter] Failed to authenticate with %s:%s", user, pw
+                )
                 continue
         return None
 
@@ -111,9 +116,10 @@ class DVWAAdapter:
             cookies = self._client.s.cookies.get_dict()
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(cookies, f, ensure_ascii=False, indent=2)
-            print(f"[INFO] 쿠키 저장 완료: {path}")
+            # [FIX] print() → self.logger
+            self.logger.info("[DVWAAdapter] 쿠키 저장 완료: %s", path)
         except Exception as e:
-            print(f"[WARN] 쿠키 저장 실패: {e}")
+            self.logger.warning("[DVWAAdapter] 쿠키 저장 실패: %s", e)
 
     def load_cookies(self, path: str):
         """저장된 쿠키 JSON을 불러와 세션에 주입"""
@@ -122,6 +128,7 @@ class DVWAAdapter:
                 cookies = json.load(f)
             for k, v in cookies.items():
                 self._client.s.cookies.set(k, v)
-            print(f"[INFO] 쿠키 복원 완료: {path}")
+            # [FIX] print() → self.logger
+            self.logger.info("[DVWAAdapter] 쿠키 복원 완료: %s", path)
         except Exception as e:
-            print(f"[WARN] 쿠키 복원 실패: {e}")
+            self.logger.warning("[DVWAAdapter] 쿠키 복원 실패: %s", e)
