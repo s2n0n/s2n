@@ -65,7 +65,9 @@ class S2NGroup(click.Group):
         click.echo(click.style("[Usage Examples]", fg="cyan", bold=True, underline=True))
         click.echo("  s2n scan -u http://example.com                 # Scan with all default plugins")
         click.echo("  s2n scan -u http://example.com --all           # Explicitly run all plugins")
+        click.echo("  s2n scan -u http://example.com -p jwt -p autobot # Run jwt and autobot plugins only")
         click.echo("  s2n scan -u http://example.com -p brute_force -y # Run brute force, accepting risks")
+        click.echo("  s2n scan -u http://example.com --output-format html -o result.html # Save HTML report")
         click.echo("  s2n list-plugins                               # List all available plugins")
         click.echo("  s2n inspect-plugin xss                         # View details of a specific plugin")
         click.echo("  s2n --help                                    # Show this help message\n")
@@ -138,10 +140,17 @@ def scan(
     logger = init_logger(verbose, log_file)
     logger.info("Starting scan for %s", url)
 
+    # HTML/CSV 포맷 선택 시 출력 경로 미지정이면 자동 생성
+    if not output and output_format and output_format.lower() in ("html", "csv"):
+        ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        ext = output_format.lower()
+        output = f"s2n_report_{ts}.{ext}"
+        console.print(f"[cyan]ℹ️  --output 미지정 — 자동 저장: {output}[/cyan]")
+
     # --all 플래그 처리 및 --plugin 생략 처리
     plugin_list = list(plugin)
     if run_all or not plugin_list:
-        plugin_list = ["csrf", "sqlinjection", "file_upload", "oscommand", "xss", "brute_force", "soft_brute_force"]
+        plugin_list = ["csrf", "sqlinjection", "file_upload", "oscommand", "xss", "brute_force", "soft_brute_force", "autobot", "jwt"]
 
     # CLIArguments 구성
     args = CLIArguments(

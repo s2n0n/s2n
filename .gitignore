@@ -28,3 +28,7 @@ coverage.xml
 dist/
 
 .clude/settings.local.json
+.rtk/filters.toml
+CLAUDE.md
+result.*.*
+password_crawling_cache.json
