@@ -32,3 +32,6 @@ dist/
 CLAUDE.md
 result.*.*
 password_crawling_cache.json
+s2n_report_*.html
+s2n_report_*.json
+s2n_report_*.csv
