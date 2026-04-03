@@ -72,6 +72,8 @@ export const AVAILABLE_PLUGINS = [
     { id: 'file_upload', name: 'File Upload', description: 'Malicious file upload' },
     { id: 'oscommand', name: 'OS Command', description: 'Command injection' },
     { id: 'soft_brute_force', name: 'Soft Brute Force', description: 'Rate-limited login attacks' },
+    { id: 'jwt', name: 'JWT', description: 'JWT vulnerability analysis' },
+    { id: 'autobot', name: 'Autobot', description: 'Automated behavior detection' },
 ]
 
 /** 초기 스캔 상태 */
