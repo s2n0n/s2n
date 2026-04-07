@@ -38,11 +38,9 @@ class PathTraversalPlugin:
     version = "0.1.0"
 
     def __init__(self, config: Optional[PluginConfig] = None):
-        self.config = config or {}
+        self.config = config
         self.depth = int(
-            getattr(self.config, "custom_params", {}).get("depth", 2)
-            if hasattr(self.config, "custom_params")
-            else 2
+            getattr(config, "custom_params", {}).get("depth", 2)
         )
 
     def run(self, plugin_context: PluginContext) -> PluginResult:

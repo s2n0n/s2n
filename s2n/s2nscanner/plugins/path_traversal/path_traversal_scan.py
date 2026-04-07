@@ -113,9 +113,11 @@ def scan_path_traversal(
     tested: set[tuple[str, str]] = set()  # (normalized_url, param)
 
     # 크롤된 URL 수집 (스캔 컨텍스트에서 가져오거나 target_url만 사용)
+    # depth는 테스트할 최대 URL 수를 제한하는 데 사용한다 (depth * 10).
+    max_urls = depth * 10
     scan_ctx = getattr(plugin_context, "scan_context", None)
     discovered: set[str] = getattr(scan_ctx, "discovered_urls", set())
-    candidate_urls: list[str] = list(discovered) if discovered else []
+    candidate_urls: list[str] = list(discovered)[:max_urls] if discovered else []
     if target_url not in candidate_urls:
         candidate_urls.insert(0, target_url)
 

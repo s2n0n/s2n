@@ -17,7 +17,7 @@ def resolve_client(self: ClassVar, plugin_context: PluginContext) -> HttpClient:
         return http_client
 
     # fallback: initialize에서 받은 http 또는 새 HttpClient
-    if self.http:
+    if getattr(self, "http", None):
         return self.http
 
     return HttpClient()
