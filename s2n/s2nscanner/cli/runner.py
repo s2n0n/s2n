@@ -150,7 +150,7 @@ def scan(
     # --all 플래그 처리 및 --plugin 생략 처리
     plugin_list = list(plugin)
     if run_all or not plugin_list:
-        plugin_list = ["csrf", "sqlinjection", "file_upload", "oscommand", "xss", "brute_force", "soft_brute_force", "autobot", "jwt"]
+        plugin_list = ["csrf", "sqlinjection", "file_upload", "oscommand", "xss", "brute_force", "soft_brute_force", "autobot", "jwt", "path_traversal"]
 
     # CLIArguments 구성
     args = CLIArguments(
