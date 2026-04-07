@@ -47,6 +47,7 @@
 | `jwt` | T1528 | Steal Application Access Token | Credential Access |
 | `autobot` | T1190 | Exploit Public-Facing Application | Initial Access |
 | `path_traversal` | T1083 | File and Directory Discovery | Discovery |
+| `sensitive_files` | T1552.001 | Credentials In Files | Credential Access |
 | _(새 플러그인)_ | _TID_ | _Technique_ | _Tactic_ |
 
 ### ATT&CK Finding → TID 매핑 방법
