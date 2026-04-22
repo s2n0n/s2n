@@ -58,7 +58,7 @@ def build_scan_config(
     # 최종 구성 반환
     return ScanConfig(
         target_url=req.target_url,
-        scanner_config=ScannerConfig(crawl_depth=2),
+        scanner_config=ScannerConfig(crawl_depth=req.depth),
         plugin_configs=plugin_configs,
         auth_config=auth_config,
         network_config=NetworkConfig(),

@@ -12,6 +12,7 @@ from s2n.s2nscanner.interfaces import (
     ScanContext,
     ProgressInfo,
     PluginStatus,
+    ValidationError,
 )
 from s2n.s2nscanner.cli.mapper import cliargs_to_scanrequest
 from s2n.s2nscanner.cli.config_builder import build_scan_config
@@ -90,9 +91,9 @@ def cli():
     "-p",
     "--plugin",
     multiple=True,
-    help="Plugins to use (can be used multiple times). If omitted or if --all is used, all default plugins will run. \n"
-         "사용할 플러그인 이름. 생략하거나 --all 사용 시 전체 플러그인이 실행됩니다. \n\n"
-         f"[available: {', '.join([p['id'] for p in discover_plugins()]) or 'none'}]",
+    help="Plugins to use (can be used multiple times). If omitted or if --all is used, all discovered plugins will run. "
+         "Run 's2n list-plugins' to see available plugins.\n"
+         "사용할 플러그인 이름. 생략하거나 --all 사용 시 자동 탐지된 전체 플러그인이 실행됩니다.",
 )
 @click.option(
     "--all", "run_all", is_flag=True, help="Run all default plugins / 모든 기본 플러그인 실행"
@@ -147,10 +148,13 @@ def scan(
         output = f"s2n_report_{ts}.{ext}"
         console.print(f"[cyan]ℹ️  --output 미지정 — 자동 저장: {output}[/cyan]")
 
-    # --all 플래그 처리 및 --plugin 생략 처리
+    # --all 플래그 처리 및 --plugin 생략 처리 (discover_plugins() 기반 동적 목록)
     plugin_list = list(plugin)
     if run_all or not plugin_list:
-        plugin_list = ["csrf", "sqlinjection", "file_upload", "oscommand", "xss", "brute_force", "soft_brute_force", "autobot", "jwt", "path_traversal", "sensitive_files"]
+        plugin_list = [p["id"] for p in discover_plugins()]
+        if not plugin_list:
+            console.print("[red]Error: No plugins discovered. Check your installation.[/red]")
+            sys.exit(1)
 
     # CLIArguments 구성
     args = CLIArguments(
@@ -167,8 +171,12 @@ def scan(
         accept_risk=accept_risk,
     )
 
-    request = cliargs_to_scanrequest(args)
-    config = build_scan_config(request, username=username, password=password)
+    try:
+        request = cliargs_to_scanrequest(args)
+        config = build_scan_config(request, username=username, password=password)
+    except ValidationError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        sys.exit(1)
 
     # 인증 처리 (DVWA)
     http_client = None
@@ -359,6 +367,7 @@ def scan(
         logger.info("Scan report successfully generated.")
     except Exception as exc:
         logger.exception("Failed to output report: %s", exc)
+        sys.exit(1)
 
 # list-plugins 명령어
 @cli.command("list-plugins")
