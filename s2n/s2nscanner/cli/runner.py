@@ -367,7 +367,6 @@ def scan(
         logger.info("Scan report successfully generated.")
     except Exception as exc:
         logger.exception("Failed to output report: %s", exc)
-        sys.exit(1)
 
 # list-plugins 명령어
 @cli.command("list-plugins")
