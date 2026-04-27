@@ -122,6 +122,25 @@ def cli():
 @click.option("-v", "--verbose", is_flag=True, help="Verbose logging / 상세 로그 출력")
 @click.option("--log-file", help="Log file path / 로그 파일 경로")
 @click.option("--login-url", default=None, help="Login page URL for auto auth / 자동 인증 시 로그인 페이지 URL")
+@click.option(
+    "--ai-mode",
+    type=click.Choice(["off", "assist", "smart", "aggressive"], case_sensitive=False),
+    default="off",
+    show_default=True,
+    help="AI agent mode / AI 에이전트 모드 (off|assist|smart|aggressive)",
+)
+@click.option(
+    "--ai-model",
+    default="s2n-agent",
+    show_default=True,
+    help="Ollama model name or HuggingFace repo ID / 사용할 AI 모델",
+)
+@click.option(
+    "--ai-endpoint",
+    default="http://localhost:11434",
+    show_default=True,
+    help="Ollama server endpoint / Ollama 서버 주소",
+)
 def scan(
     url,
     plugin,
@@ -136,6 +155,9 @@ def scan(
     verbose,
     log_file,
     login_url,
+    ai_mode,
+    ai_model,
+    ai_endpoint,
 ):
     """Run a vulnerability scan / 취약점 스캔 실행"""
     logger = init_logger(verbose, log_file)
@@ -169,6 +191,9 @@ def scan(
         verbose=verbose,
         log_file=log_file,
         accept_risk=accept_risk,
+        ai_mode=ai_mode,
+        ai_model=ai_model,
+        ai_endpoint=ai_endpoint,
     )
 
     try:
@@ -247,9 +272,25 @@ def scan(
             refresh=True,
         )
 
+    # AI 모드 활성화 시 S2NAgentPlugin 주입
+    extra_plugins = []
+    if ai_mode != "off":
+        try:
+            from s2nagent.plugins.s2n_agent_plugin import S2NAgentPlugin
+            agent_plugin = S2NAgentPlugin(
+                ai_mode=ai_mode,
+                ai_model=ai_model,
+                ai_endpoint=ai_endpoint,
+            )
+            extra_plugins = [agent_plugin]
+            console.print(f"[cyan]🤖 S2N-Agent 활성화: mode={ai_mode}, model={ai_model}[/cyan]")
+        except ImportError:
+            console.print("[yellow]⚠️  s2nagent 패키지 미설치 — AI 모드 비활성화. `pip install s2n-agent` 실행 필요.[/yellow]")
+
     scanner = Scanner(
         config=config,
         scan_context=scan_ctx,
+        plugins=extra_plugins or None,
         auth_adapter=auth_adapter,
         auth_credentials=auth_credentials,
         logger=logger,
